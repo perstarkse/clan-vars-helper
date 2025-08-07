@@ -24,7 +24,7 @@
         nixosModules.default = import ./src/secrets/module.nix;
       };
 
-      flake.modules.my-secrets = { lib, ... }@args:
+            flake.modules.default = { lib, ... }@args:
         let
           module = import ./src/secrets/module.nix;
         in

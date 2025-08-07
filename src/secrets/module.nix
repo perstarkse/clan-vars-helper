@@ -63,13 +63,13 @@ let
     ) (attrNames gens)
   );
   getPathFun = name: file:
-    let n = if nestedPaths ? ${name} then nestedPaths.${name} else {};
-        f = if n ? ${file} then n.${file} else {};
+    let n = if builtins.hasAttr name nestedPaths then builtins.getAttr name nestedPaths else {};
+        f = if builtins.hasAttr file n then builtins.getAttr file n else {};
     in if f ? path then f.path else null;
 
 in
 {
-  imports = [ (import ./expose-user.nix { inherit lib pkgs config; }) ];
+  imports = [ ./expose-user.nix ];
 
   options.my.secrets = {
     declarations = mkOption {

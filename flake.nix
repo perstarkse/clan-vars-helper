@@ -22,7 +22,6 @@
 
       flake = {
         nixosModules = {
-          default = import ./src/secrets/module.nix;
           secrets-helper = import ./src/secrets/module.nix;
         };
       };

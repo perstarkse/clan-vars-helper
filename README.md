@@ -43,7 +43,7 @@ secrets-parts/
       systems = [ "x86_64-linux" "aarch64-linux" ];
 
       imports = [
-        secrets-parts.modules.my-secrets
+        secrets-parts.modules.default
       ];
 
       perSystem = { pkgs, system, ... }: { };

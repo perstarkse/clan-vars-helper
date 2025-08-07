@@ -4,12 +4,13 @@ This repository provides a reusable Flake Parts module exposing a small helper A
 
 ## Features
 
-- Flake Parts module export for easy reuse across repos and machines
+- Flake Parts/NixOS module export for easy reuse across repos and machines
 - `my.secrets.mkSharedSecret` / `mkMachineSecret` / `mkUserSecret`
 - Auto-manifest emission at `/run/secrets[-for-users]/<name>/manifest.json`
 - Optional discovery from `vars/generators` by tags
 - One-shot service to copy a secret into a user location (`my.secrets.exposeUserSecret`)
 - Path helpers to reference deployed secret file paths directly in Nix configs
+- Per-file prompt type with multiline support: `hidden` (default) or `multiline-hidden`
 
 ## Repository layout
 
@@ -33,17 +34,19 @@ secrets-parts/
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    secrets-parts.url = "github:your-org/secrets-parts"; # this repo
-    # Ensure secrets-parts uses your nixpkgs pin
-    secrets-parts.inputs.nixpkgs.follows = "nixpkgs";
+
+    # This repo
+    secrets-helper.url = "github:perstarkse/clan-vars-secrets-helper";
+    secrets-helper.inputs.nixpkgs.follows = "nixpkgs";
+    secrets-helper.inputs.flake-parts.follows = "flake-parts";
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-parts, secrets-parts, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-parts, secrets-helper, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" ];
 
       imports = [
-        secrets-parts.modules.default
+        # If you use flake-parts in your top-level; not required for NixOS-only usage
       ];
 
       perSystem = { pkgs, system, ... }: { };
@@ -51,10 +54,10 @@ secrets-parts/
       flake.nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
-          ({ config, ... }: {
-            # Optionally import shared secrets from your repo
-            imports = [ ./vars/shared-secrets.nix ];
+          # Import the module explicitly by name
+          secrets-helper.nixosModules.secrets-helper
 
+          ({ config, pkgs, ... }: {
             # Enable discovery from vars/generators by tags
             my.secrets.discover = {
               enable = true;
@@ -107,55 +110,83 @@ secrets-parts/
 
 ## API
 
-- `my.secrets.mkSharedSecret { ... }`: creates a shared generator (`share = true`), default `neededFor = "services"`.
-- `my.secrets.mkMachineSecret { ... }`: creates a machine-local generator; `validation.hostname` is injected; default `neededFor = "services"`.
-- `my.secrets.mkUserSecret { ... }`: creates a user-scoped generator; default `neededFor = "users"`.
-- `my.secrets.declarations`: list of generator attrsets to merge into `clan.core.vars.generators`.
-- `my.secrets.discover`: discover generators by tags from a directory of `*.nix` that each return a generator attrset or a list of them.
-- `my.secrets.exposeUserSecret`: copy a secret file to a user-owned destination at boot.
-- `my.secrets.paths`: nested attrset exposing runtime paths: `<generator>.<file>.path`.
-- `my.secrets.pathsFlat`: flat attrset exposing runtime paths: `"<generator>.<file>".path`.
-- `my.secrets.getPath`: function `name -> file -> path or null`.
+### Constructors
 
-Each constructor wraps your user `script` and appends a post-step that emits a `manifest.json` describing generated files and metadata. The manifest includes dynamic fields such as `derivation.generatedAt`, `derivation.hostname`, and absolute runtime paths.
+- `my.secrets.mkSharedSecret { ... }` → shared generator (`share = true`), default `neededFor = "services"`.
+- `my.secrets.mkMachineSecret { ... }` → machine-local generator; `validation.hostname` is injected; default `neededFor = "services"`.
+- `my.secrets.mkUserSecret { ... }` → user-scoped generator; default `neededFor = "users"`.
 
-### Example: simple shared secret
+Common arguments for all three constructors:
+
+- `name` (str, required): generator name.
+- `files` (attrs of fileName → fileSpec, required): generated files.
+  - fileSpec fields:
+    - `deploy` (bool, default true): include in deployment store.
+    - `secret` (bool, default true): mark as secret in manifest.
+    - `owner` (str, default "root"): file owner on target.
+    - `group` (str, default "root"): file group on target.
+    - `mode` (str, default "0400"): octal mode.
+    - `neededFor` ("services" | "users", defaults to constructor’s default): affects runtime path prefix.
+    - `description` (str | null, default null): human-friendly description.
+    - `promptType` ("hidden" | "multiline-hidden", default "hidden"): input prompt type for Clan; enables multiline secrets.
+- `prompts` (attrs, default auto-generated): per-file prompt overrides. Auto-generated as:
+  - `prompts.<file>.input = { description = "${name} (${file})"; type = <promptType>; persist = false; }`.
+  - Provide your own `prompts` to override any subset.
+- `script` (bash string, required): writes outputs into `$out/<file>`.
+- `runtimeInputs` (list of pkgs, default `[]` + `jq`): added to PATH for `script`.
+- `dependencies` (list of derivations, default `[]`): extra build-time deps.
+- `validation` (attrs, default `{}`): embedded into manifest; `mkMachineSecret` augments with `hostname`.
+- `meta` (attrs, default `{}`): free-form metadata; included in manifest.
+- `defaultNeededFor` ("services" | "users", optional): overrides constructor default for files that omit `neededFor`.
+
+The constructor returns an attrset keyed by `name` suitable for inclusion in `my.secrets.declarations`.
+
+### Module options
+
+- `my.secrets.declarations` (list of attrs, default `[]`):
+  Merge these into `clan.core.vars.generators`.
+- `my.secrets.discover` (submodule):
+  - `enable` (bool, default false)
+  - `dir` (path, default `./vars/generators`)
+  - `includeTags` (list of str, default `[]`)
+  - `excludeTags` (list of str, default `[]`)
+- `my.secrets.paths` (read-only attrset): nested paths `<generator>.<file>.path` to deployed files.
+- `my.secrets.pathsFlat` (read-only attrset): flat paths `"<generator>.<file>".path`.
+- `my.secrets.getPath` (read-only function): `name -> file -> path or null`.
+- `my.secrets.exposeUserSecret` (nullable submodule, default null):
+  - `enable` (bool, default false)
+  - `secretName` (str): generator name
+  - `file` (str): file within generator
+  - `user` (str): target user
+  - `dest` (str, default auto: `/var/lib/user-secrets/<user>/<secret>/<file>`)
+  - `mode` (str, default `"0400"`)
+
+### Example: multiline secret prompt
 
 ```nix
 config.my.secrets.declarations = [
-  (config.my.secrets.mkSharedSecret {
-    name = "openai-api-key";
+  (config.my.secrets.mkMachineSecret {
+    name = "surrealdb-credentials";
     files = {
-      key = { description = "OpenAI API Key"; mode = "0400"; };
-    };
-    prompts = {
-      key = {
-        description = "OpenAI API Key";
-        persist = true; # stores secret in password-store
-        display.label = "OpenAI API Key";
-        type = "hidden";
-      };
+      user = { };
+      password = { promptType = "multiline-hidden"; };
     };
     script = ''
-      # If you used persist=true above, the value will be in "$prompts/key"
-      cp "$prompts/key" "$out/key"
+      echo -n "p" > "$out/user"
+      cat > "$out/password" <<'EOF'
+very
+secret
+multi
+line
+EOF
     '';
-    meta = { tags = [ "shared" "ai" ]; };
   })
 ];
-
-# Consuming this secret path elsewhere in config
-let path1 = config.my.secrets.paths."openai-api-key".key.path;
-    path2 = config.my.secrets.pathsFlat."openai-api-key.key".path;
-    path3 = config.my.secrets.getPath "openai-api-key" "key";
-in {
-  services.foo.env.SECRET_FILE = path1;
-}
 ```
 
 ## Manifest
 
-- Path: `/run/secrets/<name>/manifest.json` or `/run/secrets-for-users/<name>/manifest.json` if any file has `neededFor = "users"` or default for user secrets.
+- Path: `/run/secrets/<name>/manifest.json` or `/run/secrets-for-users/<name>/manifest.json` if any file has `neededFor = "users"` (or via user-secret constructors).
 - Contents: name, scope, share, store settings, `derivation` info (`hostname`, `generatedAt`, `dependencies`), and `files` with final deploy paths.
 
 ## Notes

@@ -96,8 +96,8 @@ in
     mkUserSecret = mkOption { type = types.raw; default = libImpl.mkUserSecret; readOnly = true; };
 
     # Helpers for reading runtime paths from Nix configurations
-    paths = mkOption { type = types.raw; default = {}; readOnly = true; description = "Nested attrset: <gen>.<file>.path -> runtime path string"; };
-    pathsFlat = mkOption { type = types.raw; default = {}; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".path -> runtime path string"; };
+    paths = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.path -> runtime path string"; };
+    pathsFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".path -> runtime path string"; };
     getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path or null"; };
   };
 
@@ -112,6 +112,5 @@ in
     clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) {} combinedDecls;
     my.secrets.paths = nestedPaths;
     my.secrets.pathsFlat = flatPaths;
-    my.secrets.getPath = getPathFun;
   };
 } 

@@ -2,7 +2,6 @@
 let
   manifestLib = import ./manifest.nix { inherit lib pkgs; };
   libImpl = import ./lib.nix { inherit lib pkgs config; manifestLib = manifestLib; };
-  exposeUser = import ./expose-user.nix { inherit lib pkgs config; };
   types = lib.types;
   mkOption = lib.mkOption;
   hasSuffix = lib.hasSuffix;
@@ -70,6 +69,8 @@ let
 
 in
 {
+  imports = [ (import ./expose-user.nix { inherit lib pkgs config; }) ];
+
   options.my.secrets = {
     declarations = mkOption {
       type = types.listOf types.attrs;
@@ -112,5 +113,5 @@ in
     my.secrets.paths = nestedPaths;
     my.secrets.pathsFlat = flatPaths;
     my.secrets.getPath = getPathFun;
-  } // exposeUser;
+  };
 } 

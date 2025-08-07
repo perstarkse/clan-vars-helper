@@ -1,7 +1,7 @@
 { lib, pkgs, config, ... }:
 let
   inherit (lib) mkIf mkOption types;
-  cfg = config.my.secrets.exposeUserSecret;
+  cfg = config.my.secrets.exposeUserSecret or null;
   isEnabled = cfg != null && cfg.enable;
   defaultDest = user: secret: file: "/var/lib/user-secrets/${user}/${secret}/${file}";
   mkServiceName = es: "my-expose-user-secret-${es.user}-${es.secretName}-${es.file}";

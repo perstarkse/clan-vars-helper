@@ -21,17 +21,10 @@
       };
 
       flake = {
-        nixosModules.default = import ./src/secrets/module.nix;
-      };
-
-            flake.modules.default = { lib, ... }@args:
-        let
-          module = import ./src/secrets/module.nix;
-        in
-        {
-          flake = {
-            nixosModules.default = module;
-          };
+        nixosModules = {
+          default = import ./src/secrets/module.nix;
+          secrets-helper = import ./src/secrets/module.nix;
         };
+      };
     };
 } 

@@ -9,6 +9,7 @@ This repository provides a reusable Flake Parts module exposing a small helper A
 - Auto-manifest emission at `/run/secrets[-for-users]/<name>/manifest.json`
 - Optional discovery from `vars/generators` by tags
 - One-shot service to copy a secret into a user location (`my.secrets.exposeUserSecret`)
+- Path helpers to reference deployed secret file paths directly in Nix configs
 
 ## Repository layout
 
@@ -93,6 +94,10 @@ secrets-parts/
               dest = "/home/alice/.config/openai/key";
               mode = "0400";
             };
+
+            # Example: use deployed file path in another module option
+            services.my-service.settings.pass_file =
+              config.my.secrets.paths."openai-api-key".key.path;
           })
         ];
       };
@@ -108,6 +113,9 @@ secrets-parts/
 - `my.secrets.declarations`: list of generator attrsets to merge into `clan.core.vars.generators`.
 - `my.secrets.discover`: discover generators by tags from a directory of `*.nix` that each return a generator attrset or a list of them.
 - `my.secrets.exposeUserSecret`: copy a secret file to a user-owned destination at boot.
+- `my.secrets.paths`: nested attrset exposing runtime paths: `<generator>.<file>.path`.
+- `my.secrets.pathsFlat`: flat attrset exposing runtime paths: `"<generator>.<file>".path`.
+- `my.secrets.getPath`: function `name -> file -> path or null`.
 
 Each constructor wraps your user `script` and appends a post-step that emits a `manifest.json` describing generated files and metadata. The manifest includes dynamic fields such as `derivation.generatedAt`, `derivation.hostname`, and absolute runtime paths.
 
@@ -135,6 +143,14 @@ config.my.secrets.declarations = [
     meta = { tags = [ "shared" "ai" ]; };
   })
 ];
+
+# Consuming this secret path elsewhere in config
+let path1 = config.my.secrets.paths."openai-api-key".key.path;
+    path2 = config.my.secrets.pathsFlat."openai-api-key.key".path;
+    path3 = config.my.secrets.getPath "openai-api-key" "key";
+in {
+  services.foo.env.SECRET_FILE = path1;
+}
 ```
 
 ## Manifest

@@ -37,6 +37,35 @@ let
             exclKO = hasAnyTag tags excludeTags;
         in inclOK && (!exclKO);
     in filter keep normalized;
+
+  # Compute runtime path used on target
+  runtimePath = name: file: neededFor:
+    let suffix = if neededFor == "users" then "-for-users" else "";
+    in "/run/secrets${suffix}/${name}/${file}";
+
+  gens = config.clan.core.vars.generators;
+  nestedPaths = lib.mapAttrs (name: gen:
+    lib.mapAttrs (fname: fcfg: {
+      path = runtimePath name fname (fcfg.neededFor or "services");
+    }) gen.files
+  ) gens;
+  flatPaths = lib.listToAttrs (
+    lib.concatMap (
+      name:
+        lib.mapAttrsToList (
+          fname: fcfg:
+            {
+              name = "${name}.${fname}";
+              value = { path = runtimePath name fname (fcfg.neededFor or "services"); };
+            }
+        ) (gens.${name}.files)
+    ) (attrNames gens)
+  );
+  getPathFun = name: file:
+    let n = nestedPaths.${name} or {};
+        f = n.${file} or {};
+    in f.path or null;
+
 in
 {
   options.my.secrets = {
@@ -62,6 +91,11 @@ in
     mkSharedSecret = mkOption { type = types.raw; default = libImpl.mkSharedSecret; readOnly = true; };
     mkMachineSecret = mkOption { type = types.raw; default = libImpl.mkMachineSecret; readOnly = true; };
     mkUserSecret = mkOption { type = types.raw; default = libImpl.mkUserSecret; readOnly = true; };
+
+    # Helpers for reading runtime paths from Nix configurations
+    paths = mkOption { type = types.raw; default = {}; readOnly = true; description = "Nested attrset: <gen>.<file>.path -> runtime path string"; };
+    pathsFlat = mkOption { type = types.raw; default = {}; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".path -> runtime path string"; };
+    getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path or null"; };
   };
 
   config = let
@@ -73,5 +107,8 @@ in
   in
   {
     clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) {} combinedDecls;
+    my.secrets.paths = nestedPaths;
+    my.secrets.pathsFlat = flatPaths;
+    my.secrets.getPath = getPathFun;
   } // exposeUser;
 } 

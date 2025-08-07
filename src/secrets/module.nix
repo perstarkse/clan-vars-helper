@@ -21,7 +21,9 @@ let
     if isList x then x
     else if isAttrs x then [ x ]
     else [];
-  hasAnyTag = tags: sel: any (t: elem t sel) (tags or []);
+  hasAnyTag = tags: sel:
+    let tlist = if builtins.isList tags then tags else [];
+    in any (t: elem t sel) tlist;
   discoverDirFiles = dir:
     let entries = attrNames (readDir dir);
     in filter (f: hasSuffix ".nix" f) entries;
@@ -46,7 +48,7 @@ let
   gens = config.clan.core.vars.generators;
   nestedPaths = lib.mapAttrs (name: gen:
     lib.mapAttrs (fname: fcfg: {
-      path = runtimePath name fname (fcfg.neededFor or "services");
+      path = runtimePath name fname (if fcfg ? neededFor then fcfg.neededFor else "services");
     }) gen.files
   ) gens;
   flatPaths = lib.listToAttrs (
@@ -56,15 +58,15 @@ let
           fname: fcfg:
             {
               name = "${name}.${fname}";
-              value = { path = runtimePath name fname (fcfg.neededFor or "services"); };
+              value = { path = runtimePath name fname (if fcfg ? neededFor then fcfg.neededFor else "services"); };
             }
         ) (gens.${name}.files)
     ) (attrNames gens)
   );
   getPathFun = name: file:
-    let n = nestedPaths.${name} or {};
-        f = n.${file} or {};
-    in f.path or null;
+    let n = if nestedPaths ? ${name} then nestedPaths.${name} else {};
+        f = if n ? ${file} then n.${file} else {};
+    in if f ? path then f.path else null;
 
 in
 {

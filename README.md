@@ -33,6 +33,8 @@ secrets-parts/
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-parts.url = "github:hercules-ci/flake-parts";
     secrets-parts.url = "github:your-org/secrets-parts"; # this repo
+    # Ensure secrets-parts uses your nixpkgs pin
+    secrets-parts.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ self, nixpkgs, flake-parts, secrets-parts, ... }:

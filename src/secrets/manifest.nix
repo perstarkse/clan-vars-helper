@@ -2,8 +2,7 @@
 let
   json = lib.generators.toJSON {};
   jq = lib.getExe pkgs.jq;
-  isDarwin = pkgs.stdenv.isDarwin;
-  defaultGroup = if isDarwin then "wheel" else "root";
+  defaultGroup = "root";
   ensureStr = x: if builtins.isString x then x else toString x;
 in
 {

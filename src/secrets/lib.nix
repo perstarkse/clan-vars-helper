@@ -7,7 +7,7 @@ let
 
   defaults = {
     owner = "root";
-    group = if pkgs.stdenv.isDarwin then "wheel" else "root";
+    group = "root";
     mode = "0400";
   };
 

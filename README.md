@@ -8,7 +8,7 @@ This repository provides a reusable Flake Parts module exposing a small helper A
 - `my.secrets.mkSharedSecret` / `mkMachineSecret` / `mkUserSecret`
 - Auto-manifest emission at `/run/secrets[-for-users]/<name>/manifest.json`
 - Optional discovery from `vars/generators` by tags
-- One-shot service to copy a secret into a user location (`my.secrets.exposeUserSecret`)
+- One-shot service to copy a secret into a user location (`my.secrets.exposeUserSecret` / `my.secrets.exposeUserSecrets`)
 - Path helpers to reference deployed secret file paths directly in Nix configs
 - Per-file prompt type with multiline support: `hidden` (default) or `multiline-hidden`
 - Value helpers for non-secrets: `my.secrets.values`, `valuesFlat`, `getValue` (mirrors `clan.core.vars.generators.<gen>.files.<file>.value`)
@@ -23,19 +23,19 @@ Choose the style that fits your workflow. You can mix them.
 
 ```nix
 my.secrets.declarations = [
-(config.my.secrets.mkUserSecret {
-name = "surrealdb-credentials";
-files.credentials = { mode = "0400"; neededFor = "users"; };
-prompts.credentials.input = {
-description = "Content of the SurrealDB credentials environment file";
-type = "hidden";
-persist = true;
-};
-script = ''
-        cp "$prompts/credentials" "$out/credentials"
-      '';
-meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
-})
+  (config.my.secrets.mkUserSecret {
+    name = "surrealdb-credentials";
+    files.credentials = { mode = "0400"; neededFor = "users"; };
+    prompts.credentials.input = {
+      description = "Content of the SurrealDB credentials environment file";
+      type = "hidden";
+      persist = true;
+    };
+    script = ''
+            cp "$prompts/credentials" "$out/credentials"
+          '';
+    meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
+  })
 ];
 ```
 
@@ -54,9 +54,9 @@ meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
 
 ```nix
 my.secrets.discover = {
-enable = true;
-dir = ./vars/generators;
-includeTags = [ "service" "surrealdb" ];
+  enable = true;
+  dir = ./vars/generators;
+  includeTags = [ "service" "surrealdb" ];
 };
 ```
 
@@ -64,19 +64,19 @@ includeTags = [ "service" "surrealdb" ];
 
 ```nix
 {
-meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
+  meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
 
-"surrealdb-credentials" = {
-files.credentials = { mode = "0400"; neededFor = "users"; };
-prompts.credentials.input = {
-description = "Content of the SurrealDB credentials environment file";
-type = "hidden";
-persist = true;
-};
-script = ''
-        cp "$prompts/credentials" "$out/credentials"
-      '';
-};
+  "surrealdb-credentials" = {
+    files.credentials = { mode = "0400"; neededFor = "users"; };
+    prompts.credentials.input = {
+      description = "Content of the SurrealDB credentials environment file";
+      type = "hidden";
+      persist = true;
+    };
+    script = ''
+            cp "$prompts/credentials" "$out/credentials"
+          '';
+  };
 }
 ```
 
@@ -102,82 +102,110 @@ module.nix
 
 ```nix
 {
-description = "My infra with vars-native secrets via flake-parts module";
+  description = "My infra with vars-native secrets via flake-parts module";
 
-inputs = {
-nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
-flake-parts.url = "github:hercules-ci/flake-parts";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    flake-parts.url = "github:hercules-ci/flake-parts";
 
-# This repo
-secrets-helper.url = "github:perstarkse/clan-vars-secrets-helper";
-secrets-helper.inputs.nixpkgs.follows = "nixpkgs";
-secrets-helper.inputs.flake-parts.follows = "flake-parts";
-};
+    # This repo
+    secrets-helper.url = "github:perstarkse/clan-vars-secrets-helper";
+    secrets-helper.inputs.nixpkgs.follows = "nixpkgs";
+    secrets-helper.inputs.flake-parts.follows = "flake-parts";
+  };
 
-outputs = inputs@{ self, nixpkgs, flake-parts, secrets-helper, ... }:
-flake-parts.lib.mkFlake { inherit inputs; } {
-systems = [ "x86_64-linux" "aarch64-linux" ];
+  outputs = inputs@{ self, nixpkgs, flake-parts, secrets-helper, ... }:
+  flake-parts.lib.mkFlake { inherit inputs; } {
+    systems = [ "x86_64-linux" "aarch64-linux" ];
 
-imports = [
-# If you use flake-parts in your top-level; not required for NixOS-only usage
-];
+    imports = [
+    # If you use flake-parts in your top-level; not required for NixOS-only usage
+    ];
 
-perSystem = { pkgs, system, ... }: { };
+    perSystem = { pkgs, system, ... }: { };
 
-flake.nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
-system = "x86_64-linux";
-modules = [
-# Import the module explicitly by name
-secrets-helper.nixosModules.secrets-helper
+    flake.nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        # Import the module explicitly by name
+        secrets-helper.nixosModules.secrets-helper
 
-({ config, pkgs, ... }: {
-# Enable discovery from vars/generators by tags
-my.secrets.discover = {
-enable = true;
-dir = ./vars/generators;
-includeTags = [ "shared" ];
-};
+        ({ config, pkgs, ... }: {
+          # Enable discovery from vars/generators by tags
+          my.secrets.discover = {
+            enable = true;
+            dir = ./vars/generators;
+            includeTags = [ "shared" ];
+          };
 
-# Add machine-only secrets
-my.secrets.declarations = [
-(config.my.secrets.mkMachineSecret {
-name = "jwt-signing-key";
-files = {
-private = { description = "JWT private key"; mode = "0400"; };
-public  = { description = "JWT public key"; secret = false; mode = "0444"; };
-};
-runtimeInputs = [ pkgs.openssl ];
-script = ''
-                  openssl genrsa -out "$out/private" 4096
-                  openssl rsa -in "$out/private" -pubout -out "$out/public"
-                '';
-meta = {
-description = "Per-machine JWT keypair";
-tags = [ "jwt" "crypto" ];
-owners = [ "security@org.example" ];
-rotateAfterDays = 180;
-};
-validation = { version = 2; };
-})
-];
+          # Add machine-only secrets
+          my.secrets.declarations = [
+            (config.my.secrets.mkMachineSecret {
+              name = "jwt-signing-key";
+              files = {
+                private = { description = "JWT private key"; mode = "0400"; };
+                public  = { description = "JWT public key"; secret = false; mode = "0444"; };
+              };
+              runtimeInputs = [ pkgs.openssl ];
+              script = ''
+                                openssl genrsa -out "$out/private" 4096
+                                openssl rsa -in "$out/private" -pubout -out "$out/public"
+                              '';
+              meta = {
+                description = "Per-machine JWT keypair";
+                tags = [ "jwt" "crypto" ];
+                owners = [ "security@org.example" ];
+                rotateAfterDays = 180;
+              };
+              validation = { version = 2; };
+            })
+          ];
 
-# Optional: expose a shared user secret to alice
-my.secrets.exposeUserSecret = {
-enable = true;
-secretName = "openai-api-key";
-file = "key";
-user = "alice";
-dest = "/home/alice/.config/openai/key";
-mode = "0400";
-};
+          # Optional: expose a shared user secret to alice (single entry)
+          my.secrets.exposeUserSecret = {
+            enable = true;
+            secretName = "openai-api-key";
+            file = "key";
+            user = "alice";
+            dest = "/home/alice/.config/openai/key";
+            mode = "0400";
+          };
 
-# Example: use deployed file path in another module option
-services.my-service.settings.pass_file =
-config.my.secrets.paths."openai-api-key".key.path;
-})
-];
-};
-};
+          # Multiple exposures (preferred)
+          my.secrets.exposeUserSecrets = [
+            {
+              enable = true;
+              secretName = "surrealdb-credentials";
+              file = "credentials";
+              user = "surrealdb";
+              dest = "/var/lib/surrealdb/credentials.env";
+              mode = "0400";
+            }
+            {
+              enable = true;
+              secretName = "user-ssh-key";
+              file = "key";
+              user = config.my.mainUser.name;
+              dest = "/home/${config.my.mainUser.name}/.ssh/id_ed25519";
+              mode = "0400";
+            }
+            {
+              enable = true;
+              secretName = "user-age-key";
+              file = "key";
+              user = config.my.mainUser.name;
+              dest = "/home/${config.my.mainUser.name}/.config/sops/age/keys.txt";
+              mode = "0400";
+            }
+          ];
+
+          # Example: use deployed file path in another module option
+          services.my-service.settings.pass_file =
+          config.my.secrets.paths."openai-api-key".key.path;
+        })
+      ];
+    };
+  };
 }
 ```
 
@@ -217,12 +245,14 @@ The constructor returns an attrset keyed by `name` suitable for inclusion in `my
 ### Module options
 
 - `my.secrets.declarations` (list of attrs, default `[]`):
-Merge these into `clan.core.vars.generators`.
+  Merge these into `clan.core.vars.generators`.
 - `my.secrets.discover` (submodule):
 - `enable` (bool, default false)
 - `dir` (path, default `./vars/generators`)
 - `includeTags` (list of str, default `[]`)
 - `excludeTags` (list of str, default `[]`)
+- `my.secrets.exposeUserSecret` (single entry, legacy): expose one secret file to a user-owned destination. Prefer `exposeUserSecrets`.
+- `my.secrets.exposeUserSecrets` (list of submodules): expose multiple secret files to user-owned destinations. Each entry supports: `enable`, `secretName`, `file`, `user`, `dest` (default: `/var/lib/user-secrets/<user>/<secret>/<file>`), `mode` (default `0400`).
 - `my.secrets.paths` (read-only attrset): nested paths `<generator>.<file>.path` to deployed files.
 - `my.secrets.pathsFlat` (read-only attrset): flat paths `"<generator>.<file>".path`.
 - `my.secrets.getPath` (read-only function): `name -> file -> path or null`.
@@ -234,22 +264,22 @@ Merge these into `clan.core.vars.generators`.
 
 ```nix
 config.my.secrets.declarations = [
-(config.my.secrets.mkMachineSecret {
-name = "surrealdb-credentials";
-files = {
-user = { };
-password = { promptType = "multiline-hidden"; };
-};
-script = ''
-      echo -n "p" > "$out/user"
-      cat > "$out/password" <<'EOF'
+  (config.my.secrets.mkMachineSecret {
+    name = "surrealdb-credentials";
+    files = {
+      user = { };
+      password = { promptType = "multiline-hidden"; };
+    };
+    script = ''
+          echo -n "p" > "$out/user"
+          cat > "$out/password" <<'EOF'
 very
 secret
 multi
 line
 EOF
-    '';
-})
+        '';
+  })
 ];
 ```
 
@@ -272,13 +302,13 @@ Example:
 ```nix
 # Define a non-secret value and read it
 my.secrets.declarations = [
-(config.my.secrets.mkSharedSecret {
-name = "example";
-files.public = { secret = false; mode = "0444"; };
-script = ''
-      echo -n "hello" > "$out/public"
-    '';
-})
+  (config.my.secrets.mkSharedSecret {
+    name = "example";
+    files.public = { secret = false; mode = "0444"; };
+    script = ''
+          echo -n "hello" > "$out/public"
+        '';
+  })
 ];
 
 # Canonical per Clan
@@ -292,7 +322,7 @@ config.my.secrets.valuesFlat."example.public".value
 
 ## Manifest
 
-- Path: `/run/secrets/<name>/manifest.json` or `/run/secrets-for-users/<name>/manifest.json` if any file has `neededFor = "users"` (or via user-secret constructors).
+- Path: `/run/secrets/<name>/manifest.json` or `/run/secrets-for-users/<name>/manifest.json` if any file has `neededFor = "users"` (or via user-secret constructors). Paths inside the manifest include the `vars` segment to match runtime layout.
 - Contents: name, scope, share, store settings, `derivation` info (`hostname`, `generatedAt`, `dependencies`), and `files` with final deploy paths.
 
 ## Notes
@@ -302,8 +332,8 @@ config.my.secrets.valuesFlat."example.public".value
 
 ```nix
 validation = {
-version = 1;
-# metaHash = builtins.hashString "sha256" (builtins.toJSON meta);
+  version = 1;
+  # metaHash = builtins.hashString "sha256" (builtins.toJSON meta);
 };
 ```
 

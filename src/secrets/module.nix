@@ -142,7 +142,7 @@ let
 
 in
 {
-  imports = [ ./expose-user.nix ];
+  imports = [ ./expose-user.nix ./acl.nix ];
 
   options.my.secrets = {
     declarations = mkOption {

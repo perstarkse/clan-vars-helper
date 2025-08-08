@@ -56,6 +56,9 @@ let
         )
         files;
 
+      # Capture optional per-file ACL readers from the original input (do not leak to exported files)
+      additionalReadersByFile = lib.mapAttrs (_fname: fcfg: fcfg.additionalReaders or [ ]) files;
+
       # Auto-generate prompts for files unless provided; user-provided prompts override auto.
       promptsAuto = lib.mapAttrs
         (fname: fcfg: {
@@ -89,7 +92,12 @@ let
         prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
-        validation = validation // { };
+        validation = (validation // {
+          # Side-channel for module logic; safe to include in validation
+          acl = {
+            additionalReaders = additionalReadersByFile;
+          };
+        });
       };
     };
 

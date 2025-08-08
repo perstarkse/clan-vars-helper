@@ -12,6 +12,9 @@ This repository provides a reusable Flake Parts module exposing a small helper A
 - Path helpers to reference deployed secret file paths directly in Nix configs
 - Per-file prompt type with multiline support: `hidden` (default) or `multiline-hidden`
 - Value helpers for non-secrets: `my.secrets.values`, `valuesFlat`, `getValue` (mirrors `clan.core.vars.generators.<gen>.files.<file>.value`)
+- ACL helpers to grant user read-access to root-owned secret files without duplication:
+  - Per-file `files.<file>.additionalReaders = [ "alice" "service-user" ];`
+  - Manual `my.secrets.allowReadAccess = [ { path = "/run/secrets/..."; readers = [ "alice" ]; } ];`
 
 ## Usage patterns
 
@@ -85,6 +88,51 @@ my.secrets.discover = {
 - Discovery strips `meta` before merging into `clan.core.vars.generators` to avoid schema errors.
 - Raw declarations use your exact `script` and do not get constructor wrapping (no automatic manifest/prompt defaults) unless you implement it.
 
+## ACL read access (no duplication)
+
+When you need root-owned secret files for system services and also want to surface the value to specific users (e.g., to export into their shell), you can grant per-user read ACLs.
+
+- Per-file (preferred):
+
+```nix
+my.secrets.declarations = [
+  (config.my.secrets.mkSharedSecret {
+    name = "api-key-aws-access";
+    files.aws_access_key_id = {
+      mode = "0400";
+      neededFor = "users"; # deploys under /run/secrets-for-users/vars/...
+      additionalReaders = [ "alice" ]; # grant read ACL to these users
+    };
+    prompts.aws_access_key_id.input = {
+      description = "AWS access key ID";
+      persist = true;
+      type = "hidden";
+    };
+    script = ''
+      cp "$prompts/aws_access_key_id" "$out/aws_access_key_id"
+    '';
+    meta.tags = [ "aws" "api-key" "dev" "fish" ];
+  })
+];
+```
+
+This generates systemd path/service units that apply `setfacl u:<user>:r` to the deployed file whenever it appears or changes.
+
+- Manual (arbitrary files):
+
+```nix
+let p = config.my.secrets.paths."api-key-aws-access".aws_access_key_id.path; in
+{
+  my.secrets.allowReadAccess = [
+    { path = my.secrets.getPath "key" "value; readers = [ "alice" ]; }
+  ];
+}
+```
+
+- Notes:
+  - Requires filesystem ACL support (typically enabled by default on ext4/xfs). The module pulls in `pkgs.acl` automatically if any ACLs are declared.
+  - ACLs layer on top of `0400 root:root` modes, avoiding duplication or group sprawl.
+
 ## Repository layout
 
 ```
@@ -96,6 +144,7 @@ manifest.nix
 lib.nix
 expose-user.nix
 module.nix
+acl.nix
 ```
 
 ## Consume from another flake
@@ -239,6 +288,7 @@ Common arguments for all three constructors:
 - `validation` (attrs, default `{}`): embedded into manifest; `mkMachineSecret` augments with `hostname`.
 - `meta` (attrs, default `{}`): free-form metadata; included in manifest.
 - `defaultNeededFor` ("services" | "users", optional): overrides constructor default for files that omit `neededFor`.
+- `files.<file>.additionalReaders` (list of str, default `[]`): users to grant read ACLs to on the deployed file; applied via systemd+`setfacl`.
 
 The constructor returns an attrset keyed by `name` suitable for inclusion in `my.secrets.declarations`.
 
@@ -259,6 +309,7 @@ The constructor returns an attrset keyed by `name` suitable for inclusion in `my
 - `my.secrets.values` (read-only attrset): nested values `<generator>.<file>.value` (string or null; only for non-secret files).
 - `my.secrets.valuesFlat` (read-only attrset): flat values `"<generator>.<file>".value` (string or null; only for non-secret files).
 - `my.secrets.getValue` (read-only function): `name -> file -> value (string) or null` (only for non-secret files).
+- `my.secrets.allowReadAccess` (list): manual ACL declarations `{ path, readers = [ ... ] }` to grant read ACLs via `setfacl`.
 
 ### Example: multiline secret prompt
 

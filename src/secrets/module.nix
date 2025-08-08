@@ -32,20 +32,26 @@ let
     let
       topLevelTags = if gen ? meta && gen.meta ? tags then gen.meta.tags else [ ];
       innerNames = filter (n: n != "meta") (attrNames gen);
-      innerTags = lib.concatMap (
-        n:
-        let v = builtins.getAttr n gen;
-        in if isAttrs v && v ? meta && v.meta ? tags then v.meta.tags else [ ]
-      ) innerNames;
-    in if topLevelTags != [ ] then topLevelTags else innerTags;
+      innerTags = lib.concatMap
+        (
+          n:
+          let v = builtins.getAttr n gen;
+          in if isAttrs v && v ? meta && v.meta ? tags then v.meta.tags else [ ]
+        )
+        innerNames;
+    in
+    if topLevelTags != [ ] then topLevelTags else innerTags;
   # Remove any meta attribute present at the top-level of a declaration and within its immediate generator objects
   stripMeta = decl:
     let
       noTopMeta = builtins.removeAttrs decl [ "meta" ];
-    in lib.mapAttrs (
-      name: value:
-        if isAttrs value then builtins.removeAttrs value [ "meta" ] else value
-    ) noTopMeta;
+    in
+    lib.mapAttrs
+      (
+        name: value:
+          if isAttrs value then builtins.removeAttrs value [ "meta" ] else value
+      )
+      noTopMeta;
   discoverFromDir = dir: includeTags: excludeTags:
     let
       files = discoverDirFiles dir;

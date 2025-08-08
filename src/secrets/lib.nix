@@ -23,42 +23,49 @@ let
     };
   };
 
-  mkBase = {
-    name,
-    scope,                 # "shared" | "machine" | "user"
-    share ? (scope == "shared"),
-    files,
-    prompts ? {},
-    script,                # user script that writes to $out
-    runtimeInputs ? [],
-    dependencies ? [],
-    validation ? {},
-    meta ? {},
-    defaultNeededFor ? (if scope == "user" then "users" else "services"),
-  }:
+  mkBase =
+    { name
+    , scope
+    , # "shared" | "machine" | "user"
+      share ? (scope == "shared")
+    , files
+    , prompts ? { }
+    , script
+    , # user script that writes to $out
+      runtimeInputs ? [ ]
+    , dependencies ? [ ]
+    , validation ? { }
+    , meta ? { }
+    , defaultNeededFor ? (if scope == "user" then "users" else "services")
+    ,
+    }:
     let
       # Accept extra per-file attribute `promptType` (e.g., "hidden", "multiline-hidden")
-      filesWithDefaults = lib.mapAttrs (fname: fcfg:
-        {
-          deploy = if fcfg ? deploy then fcfg.deploy else true;
-          secret = if fcfg ? secret then fcfg.secret else true;
-          owner = fcfg.owner or defaults.owner;
-          group = fcfg.group or defaults.group;
-          mode = fcfg.mode or defaults.mode;
-          neededFor = fcfg.neededFor or defaultNeededFor;
-          description = fcfg.description or null;
-          promptType = fcfg.promptType or null;
-        }
-      ) files;
+      filesWithDefaults = lib.mapAttrs
+        (fname: fcfg:
+          {
+            deploy = if fcfg ? deploy then fcfg.deploy else true;
+            secret = if fcfg ? secret then fcfg.secret else true;
+            owner = fcfg.owner or defaults.owner;
+            group = fcfg.group or defaults.group;
+            mode = fcfg.mode or defaults.mode;
+            neededFor = fcfg.neededFor or defaultNeededFor;
+            description = fcfg.description or null;
+            promptType = fcfg.promptType or null;
+          }
+        )
+        files;
 
       # Auto-generate prompts for files unless provided; user-provided prompts override auto.
-      promptsAuto = lib.mapAttrs (fname: fcfg: {
-        input = {
-          description = "${name} (${fname})";
-          type = if fcfg.promptType != null then fcfg.promptType else "hidden";
-          persist = false;
-        };
-      }) filesWithDefaults;
+      promptsAuto = lib.mapAttrs
+        (fname: fcfg: {
+          input = {
+            description = "${name} (${fname})";
+            type = if fcfg.promptType != null then fcfg.promptType else "hidden";
+            persist = false;
+          };
+        })
+        filesWithDefaults;
       promptsFinal = lib.recursiveUpdate promptsAuto prompts;
 
       # Do not leak promptType into exported files schema
@@ -91,8 +98,10 @@ let
 
   mkMachineSecret = args:
     mkBase (args // {
-      scope = "machine"; share = false; defaultNeededFor = args.defaultNeededFor or "services";
-      validation = (args.validation or {}) // { hostname = config.networking.hostName; };
+      scope = "machine";
+      share = false;
+      defaultNeededFor = args.defaultNeededFor or "services";
+      validation = (args.validation or { }) // { hostname = config.networking.hostName; };
     });
 
   mkUserSecret = args:
@@ -101,4 +110,4 @@ let
 in
 {
   inherit mkBase mkSharedSecret mkMachineSecret mkUserSecret;
-} 
+}

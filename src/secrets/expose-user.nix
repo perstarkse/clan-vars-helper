@@ -28,53 +28,56 @@ in
     description = "Helper to copy a secret into a user-owned location at boot.";
   };
 
-  config = mkIf isEnabled (let
-    es = cfg;
-    # Note the 'vars' segment in runtime path
-    srcDir = "/run/secrets-for-users/vars/${es.secretName}";
-    srcFile = "${srcDir}/${es.file}";
-    destPath = if es.dest != "" then es.dest else defaultDest es.user es.secretName es.file;
-    destDir = "$(dirname '${destPath}')";
-    svcName = mkServiceName es;
-  in {
-    # Trigger service when the secret file content is modified (debounced)
-    systemd.paths."${svcName}" = {
-      wantedBy = [ "multi-user.target" ];
-      unitConfig = {
-        TriggerLimitIntervalSec = 10;
-        TriggerLimitBurst = 2;
+  config = mkIf isEnabled (
+    let
+      es = cfg;
+      # Note the 'vars' segment in runtime path
+      srcDir = "/run/secrets-for-users/vars/${es.secretName}";
+      srcFile = "${srcDir}/${es.file}";
+      destPath = if es.dest != "" then es.dest else defaultDest es.user es.secretName es.file;
+      destDir = "$(dirname '${destPath}')";
+      svcName = mkServiceName es;
+    in
+    {
+      # Trigger service when the secret file content is modified (debounced)
+      systemd.paths."${svcName}" = {
+        wantedBy = [ "multi-user.target" ];
+        unitConfig = {
+          TriggerLimitIntervalSec = 10;
+          TriggerLimitBurst = 2;
+        };
+        pathConfig = {
+          PathModified = srcFile;
+        };
       };
-      pathConfig = {
-        PathModified = srcFile;
-      };
-    };
 
-    systemd.services."${svcName}" = {
-      description = "Expose secret ${es.secretName}/${es.file} to user ${es.user}";
-      # Start only via the .path trigger; avoid duplicate starts on boot
-      after = [ "local-fs.target" ];
-      unitConfig = {
-        ConditionPathExists = srcFile;
-        StartLimitIntervalSec = 10;
-        StartLimitBurst = 100;
-      };
-      serviceConfig = {
-        Type = "oneshot";
-        Restart = "on-failure";
-        RestartSec = 1;
-      };
-      script = ''
-        set -euo pipefail
-        install -d -m 0700 -o ${es.user} -g ${groupFor es.user} "${destDir}"
-        if [ -s "${srcFile}" ]; then
-          # Only update if content changed to avoid unnecessary triggers
-          if ! cmp -s "${srcFile}" "${destPath}" 2>/dev/null; then
-            install -m ${es.mode} -o ${es.user} -g ${groupFor es.user} "${srcFile}" "${destPath}"
+      systemd.services."${svcName}" = {
+        description = "Expose secret ${es.secretName}/${es.file} to user ${es.user}";
+        # Start only via the .path trigger; avoid duplicate starts on boot
+        after = [ "local-fs.target" ];
+        unitConfig = {
+          ConditionPathExists = srcFile;
+          StartLimitIntervalSec = 10;
+          StartLimitBurst = 100;
+        };
+        serviceConfig = {
+          Type = "oneshot";
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+        script = ''
+          set -euo pipefail
+          install -d -m 0700 -o ${es.user} -g ${groupFor es.user} "${destDir}"
+          if [ -s "${srcFile}" ]; then
+            # Only update if content changed to avoid unnecessary triggers
+            if ! cmp -s "${srcFile}" "${destPath}" 2>/dev/null; then
+              install -m ${es.mode} -o ${es.user} -g ${groupFor es.user} "${srcFile}" "${destPath}"
+            fi
+          else
+            echo "Warning: source secret ${srcFile} not found or empty"
           fi
-        else
-          echo "Warning: source secret ${srcFile} not found or empty"
-        fi
-      '';
-    };
-  });
-} 
+        '';
+      };
+    }
+  );
+}

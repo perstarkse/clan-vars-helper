@@ -13,6 +13,78 @@ This repository provides a reusable Flake Parts module exposing a small helper A
 - Per-file prompt type with multiline support: `hidden` (default) or `multiline-hidden`
 - Value helpers for non-secrets: `my.secrets.values`, `valuesFlat`, `getValue` (mirrors `clan.core.vars.generators.<gen>.files.<file>.value`)
 
+## Usage patterns
+
+Choose the style that fits your workflow. You can mix them.
+
+- Inline with constructors (consuming module)
+
+- Define secrets where they are used, e.g. with `mkUserSecret`:
+
+```nix
+my.secrets.declarations = [
+(config.my.secrets.mkUserSecret {
+name = "surrealdb-credentials";
+files.credentials = { mode = "0400"; neededFor = "users"; };
+prompts.credentials.input = {
+description = "Content of the SurrealDB credentials environment file";
+type = "hidden";
+persist = true;
+};
+script = ''
+        cp "$prompts/credentials" "$out/credentials"
+      '';
+meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
+})
+];
+```
+
+- Pros: simplest wiring; sane defaults; auto manifest and prompt shaping.
+- Tags: metadata only (don’t affect inclusion).
+
+- Aggregated module (e.g., `nixosModules.apiKeys`)
+
+- Group related secrets using constructors and import that module on hosts that need them.
+- Pros: clear ownership, reuse across machines, per-secret `runtimeInputs`.
+- Tags: metadata only unless you add your own selection logic.
+
+- Discovery by tags (raw declarations)
+
+- Place raw generator attrsets in a folder (default `vars/generators`) and enable discovery:
+
+```nix
+my.secrets.discover = {
+enable = true;
+dir = ./vars/generators;
+includeTags = [ "service" "surrealdb" ];
+};
+```
+
+- Example file `vars/generators/surrealdb.nix`:
+
+```nix
+{
+meta = { tags = [ "oumuamua" "service" "surrealdb" ]; };
+
+"surrealdb-credentials" = {
+files.credentials = { mode = "0400"; neededFor = "users"; };
+prompts.credentials.input = {
+description = "Content of the SurrealDB credentials environment file";
+type = "hidden";
+persist = true;
+};
+script = ''
+        cp "$prompts/credentials" "$out/credentials"
+      '';
+};
+}
+```
+
+- Notes:
+- Tags in `meta.tags` can be at the top-level or inside the generator; both are recognized for filtering.
+- Discovery strips `meta` before merging into `clan.core.vars.generators` to avoid schema errors.
+- Raw declarations use your exact `script` and do not get constructor wrapping (no automatic manifest/prompt defaults) unless you implement it.
+
 ## Repository layout
 
 ```

@@ -42,10 +42,10 @@ let
     in
     filter keep normalized;
 
-  # Compute runtime path used on target
+  # Compute runtime path used on target (vars layout)
   runtimePath = name: file: neededFor:
     let suffix = if neededFor == "users" then "-for-users" else "";
-    in "/run/secrets${suffix}/${name}/${file}";
+    in "/run/secrets${suffix}/vars/${name}/${file}";
 
   gens = config.clan.core.vars.generators;
   nestedPaths = lib.mapAttrs

@@ -30,17 +30,20 @@ in
 
   config = mkIf isEnabled (let
     es = cfg;
-    srcDir = "/run/secrets-for-users/${es.secretName}";
+    # Note the 'vars' segment in runtime path
+    srcDir = "/run/secrets-for-users/vars/${es.secretName}";
     srcFile = "${srcDir}/${es.file}";
     destPath = if es.dest != "" then es.dest else defaultDest es.user es.secretName es.file;
     destDir = "$(dirname '${destPath}')";
     svcName = mkServiceName es;
   in {
-    # Trigger service when the secret file appears
+    # Trigger service when the secret file appears or changes
     systemd.paths."${svcName}" = {
       wantedBy = [ "multi-user.target" ];
       pathConfig = {
         PathExists = srcFile;
+        PathChanged = srcFile;
+        PathModified = srcFile;
       };
     };
 

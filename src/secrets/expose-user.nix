@@ -34,11 +34,24 @@ in
     srcFile = "${srcDir}/${es.file}";
     destPath = if es.dest != "" then es.dest else defaultDest es.user es.secretName es.file;
     destDir = "$(dirname '${destPath}')";
+    svcName = mkServiceName es;
   in {
-    systemd.services."${mkServiceName es}" = {
+    # Trigger service when the secret file appears
+    systemd.paths."${svcName}" = {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig = {
+        PathExists = srcFile;
+      };
+    };
+
+    systemd.services."${svcName}" = {
       description = "Expose secret ${es.secretName}/${es.file} to user ${es.user}";
+      # Keep WantedBy so manual start at boot is allowed, but guard with ConditionPathExists
       wantedBy = [ "multi-user.target" ];
       after = [ "local-fs.target" ];
+      unitConfig = {
+        ConditionPathExists = srcFile;
+      };
       serviceConfig = {
         Type = "oneshot";
       };

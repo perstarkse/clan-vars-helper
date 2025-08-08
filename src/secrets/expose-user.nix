@@ -6,7 +6,6 @@ let
   defaultDest = user: secret: file: "/var/lib/user-secrets/${user}/${secret}/${file}";
   mkServiceName = es: "my-expose-user-secret-${es.user}-${es.secretName}-${es.file}";
   ensureString = v: if builtins.isString v then v else toString v;
-  groupFor = user: ensureString user; # assume group name = user by default
 
   # Enabled entries combined from single (legacy) and list (new)
   allEntries =
@@ -55,11 +54,15 @@ let
       };
       script = ''
         set -euo pipefail
-        install -d -m 0700 -o ${es.user} -g ${groupFor es.user} "${destDir}"
+        group="${es.group or ""}"
+        if [ -z "$group" ]; then
+          group="$(id -gn ${es.user})"
+        fi
+        install -d -m 0700 -o ${es.user} -g "$group" "${destDir}"
         if [ -s "${srcFile}" ]; then
           # Only update if content changed to avoid unnecessary triggers
           if ! cmp -s "${srcFile}" "${destPath}" 2>/dev/null; then
-            install -m ${es.mode or "0400"} -o ${es.user} -g ${groupFor es.user} "${srcFile}" "${destPath}"
+            install -m ${es.mode or "0400"} -o ${es.user} -g "$group" "${srcFile}" "${destPath}"
           fi
         else
           echo "Warning: source secret ${srcFile} not found or empty"
@@ -82,6 +85,11 @@ in
           description = "Destination path. Default: /var/lib/user-secrets/<user>/<secretName>/<file>";
         };
         mode = mkOption { type = types.str; default = "0400"; };
+        group = mkOption {
+          type = types.str;
+          default = "";
+          description = "Group owner for files. Default: primary group of the user";
+        };
       };
     });
     default = null;
@@ -101,6 +109,11 @@ in
           description = "Destination path. Default: /var/lib/user-secrets/<user>/<secretName>/<file>";
         };
         mode = mkOption { type = types.str; default = "0400"; };
+        group = mkOption {
+          type = types.str;
+          default = "";
+          description = "Group owner for files. Default: primary group of the user";
+        };
       };
     });
     default = [ ];

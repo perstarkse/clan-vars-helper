@@ -37,12 +37,14 @@ in
     destDir = "$(dirname '${destPath}')";
     svcName = mkServiceName es;
   in {
-    # Trigger service when the secret file appears or changes
+    # Trigger service when the secret file content is modified (debounced)
     systemd.paths."${svcName}" = {
       wantedBy = [ "multi-user.target" ];
+      unitConfig = {
+        TriggerLimitIntervalSec = 10;
+        TriggerLimitBurst = 2;
+      };
       pathConfig = {
-        PathExists = srcFile;
-        PathChanged = srcFile;
         PathModified = srcFile;
       };
     };
@@ -53,8 +55,8 @@ in
       after = [ "local-fs.target" ];
       unitConfig = {
         ConditionPathExists = srcFile;
-        StartLimitIntervalSec = 5;
-        StartLimitBurst = 10;
+        StartLimitIntervalSec = 10;
+        StartLimitBurst = 100;
       };
       serviceConfig = {
         Type = "oneshot";

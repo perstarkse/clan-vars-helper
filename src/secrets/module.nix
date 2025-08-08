@@ -27,6 +27,25 @@ let
     let entries = attrNames (readDir dir);
     in filter (f: hasSuffix ".nix" f) entries;
   importFile = dir: f: import (dir + "/${f}");
+  # Extract tags from either a top-level meta.tags, or from any inner generator object's meta.tags
+  extractTags = gen:
+    let
+      topLevelTags = if gen ? meta && gen.meta ? tags then gen.meta.tags else [ ];
+      innerNames = filter (n: n != "meta") (attrNames gen);
+      innerTags = lib.concatMap (
+        n:
+        let v = builtins.getAttr n gen;
+        in if isAttrs v && v ? meta && v.meta ? tags then v.meta.tags else [ ]
+      ) innerNames;
+    in if topLevelTags != [ ] then topLevelTags else innerTags;
+  # Remove any meta attribute present at the top-level of a declaration and within its immediate generator objects
+  stripMeta = decl:
+    let
+      noTopMeta = builtins.removeAttrs decl [ "meta" ];
+    in lib.mapAttrs (
+      name: value:
+        if isAttrs value then builtins.removeAttrs value [ "meta" ] else value
+    ) noTopMeta;
   discoverFromDir = dir: includeTags: excludeTags:
     let
       files = discoverDirFiles dir;
@@ -34,13 +53,15 @@ let
       normalized = concatMap normalizeGenerators imported;
       keep = gen:
         let
-          tags = if gen ? meta && gen.meta ? tags then gen.meta.tags else [ ];
+          tags = extractTags gen;
           inclOK = (includeTags == [ ]) || hasAnyTag tags includeTags;
           exclKO = hasAnyTag tags excludeTags;
         in
         inclOK && (!exclKO);
+      # Ensure merged declarations do not leak meta into clan.core.vars.generators
+      cleaned = map stripMeta (filter keep normalized);
     in
-    filter keep normalized;
+    cleaned;
 
   # Compute runtime path used on target (vars layout)
   runtimePath = name: file: neededFor:

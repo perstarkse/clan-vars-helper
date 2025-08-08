@@ -54,7 +54,7 @@ in
         EOF
                 ${jq} '
                   .derivation.generatedAt = $ts
-                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "") + "/${args.name}/" + .name)))
+                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "") + "/vars/${args.name}/" + .name)))
                 ' --arg ts "$gen_ts" "$tmp_manifest" > "$out/manifest.json"
                 rm -f "$tmp_manifest"
       '';

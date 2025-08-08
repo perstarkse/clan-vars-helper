@@ -39,7 +39,7 @@ in
       svcName = mkServiceName es;
     in
     {
-      # Trigger service when the secret file content is modified (debounced)
+      # Trigger service when the secret file content is modified or atomically replaced
       systemd.paths."${svcName}" = {
         wantedBy = [ "multi-user.target" ];
         unitConfig = {
@@ -48,6 +48,7 @@ in
         };
         pathConfig = {
           PathModified = srcFile;
+          PathChanged = srcDir;
         };
       };
 

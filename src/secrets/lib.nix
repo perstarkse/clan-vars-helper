@@ -37,6 +37,7 @@ let
     defaultNeededFor ? (if scope == "user" then "users" else "services"),
   }:
     let
+      # Accept extra per-file attribute `promptType` (e.g., "hidden", "multiline-hidden")
       filesWithDefaults = lib.mapAttrs (fname: fcfg:
         {
           deploy = if fcfg ? deploy then fcfg.deploy else true;
@@ -46,15 +47,29 @@ let
           mode = fcfg.mode or defaults.mode;
           neededFor = fcfg.neededFor or defaultNeededFor;
           description = fcfg.description or null;
+          promptType = fcfg.promptType or null;
         }
       ) files;
 
-      filesAll = ensureManifestFile (filesWithDefaults // { __defaultNeededFor = defaultNeededFor; });
+      # Auto-generate prompts for files unless provided; user-provided prompts override auto.
+      promptsAuto = lib.mapAttrs (fname: fcfg: {
+        input = {
+          description = "${name} (${fname})";
+          type = if fcfg.promptType != null then fcfg.promptType else "hidden";
+          persist = false;
+        };
+      }) filesWithDefaults;
+      promptsFinal = lib.recursiveUpdate promptsAuto prompts;
+
+      # Do not leak promptType into exported files schema
+      filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" ]) filesWithDefaults;
+
+      filesAll = ensureManifestFile (filesForGenerator // { __defaultNeededFor = defaultNeededFor; });
 
       runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
       wrappedScript = manifestLib.wrapScript {
         inherit name scope share validation meta settings dependencies;
-        filesSpec = filesWithDefaults;
+        filesSpec = filesForGenerator;
         userScript = script;
         defaultNeededFor = defaultNeededFor;
         hostName = config.networking.hostName or "unknown-host";
@@ -64,7 +79,7 @@ let
       ${name} = {
         inherit name share dependencies;
         files = builtins.removeAttrs filesAll [ "__defaultNeededFor" ];
-        prompts = prompts;
+        prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
         validation = validation // { };

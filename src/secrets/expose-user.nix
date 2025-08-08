@@ -49,20 +49,26 @@ in
 
     systemd.services."${svcName}" = {
       description = "Expose secret ${es.secretName}/${es.file} to user ${es.user}";
-      # Keep WantedBy so manual start at boot is allowed, but guard with ConditionPathExists
-      wantedBy = [ "multi-user.target" ];
+      # Start only via the .path trigger; avoid duplicate starts on boot
       after = [ "local-fs.target" ];
       unitConfig = {
         ConditionPathExists = srcFile;
+        StartLimitIntervalSec = 5;
+        StartLimitBurst = 10;
       };
       serviceConfig = {
         Type = "oneshot";
+        Restart = "on-failure";
+        RestartSec = 1;
       };
       script = ''
         set -euo pipefail
         install -d -m 0700 -o ${es.user} -g ${groupFor es.user} "${destDir}"
         if [ -s "${srcFile}" ]; then
-          install -m ${es.mode} -o ${es.user} -g ${groupFor es.user} "${srcFile}" "${destPath}"
+          # Only update if content changed to avoid unnecessary triggers
+          if ! cmp -s "${srcFile}" "${destPath}" 2>/dev/null; then
+            install -m ${es.mode} -o ${es.user} -g ${groupFor es.user} "${srcFile}" "${destPath}"
+          fi
         else
           echo "Warning: source secret ${srcFile} not found or empty"
         fi

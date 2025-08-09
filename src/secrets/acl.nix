@@ -61,11 +61,9 @@ let
     in {
       paths."${unitBase}" = {
         wantedBy = [ "multi-user.target" ];
-        unitConfig.TriggerLimitIntervalSec = 10;
-        unitConfig.TriggerLimitBurst = 5;
+        unitConfig.TriggerLimitIntervalSec = 30;
+        unitConfig.TriggerLimitBurst = 30;
         pathConfig = {
-          # Trigger once at boot if the file already exists
-          PathExists = item.path;
           # Trigger when the file content changes
           PathModified = item.path;
           # Trigger when the containing directory changes (creation, rename)
@@ -76,17 +74,23 @@ let
         description = "Apply ACL for ${item.path}";
         wantedBy = [ "multi-user.target" ];
         after = [ "local-fs.target" ];
+        unitConfig = {
+          StartLimitIntervalSec = 300;
+          StartLimitBurst = 60;
+        };
         serviceConfig = {
           Type = "oneshot";
           Restart = "on-failure";
           RestartSec = 1;
         };
         script =
-          let setfacl = lib.getExe' pkgs.acl "setfacl";
+          let
+            setfacl = lib.getExe' pkgs.acl "setfacl";
+            getfacl = lib.getExe' pkgs.acl "getfacl";
           in ''
             set -euo pipefail
             if [ -e "${item.path}" ]; then
-              # Apply even if empty; ensure ACL exists after creation
+              # Apply unconditionally; setfacl is idempotent for identical rule
               ${lib.concatStringsSep "\n" (map (u: ''${setfacl} -m u:${u}:r "${item.path}"'') item.readers)}
             fi
           '';

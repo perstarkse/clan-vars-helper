@@ -17,7 +17,6 @@ let
       mode = "0444";
       owner = defaults.owner;
       group = defaults.group;
-      description = "Machine-readable secret manifest";
       deploy = true;
       neededFor = files.__defaultNeededFor or "services";
     };
@@ -71,15 +70,16 @@ let
         filesWithDefaults;
       promptsFinal = lib.recursiveUpdate promptsAuto prompts;
 
-      # Do not leak promptType into exported files schema
-      filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" ]) filesWithDefaults;
+      # Do not leak promptType or description into exported files schema for clan.core.vars.generators
+      filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" "description" ]) filesWithDefaults;
 
       filesAll = ensureManifestFile (filesForGenerator // { __defaultNeededFor = defaultNeededFor; });
 
       runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
       wrappedScript = manifestLib.wrapScript {
         inherit name scope share validation meta settings dependencies;
-        filesSpec = filesForGenerator;
+        # Use the richer spec so the manifest JSON can include descriptive fields
+        filesSpec = filesWithDefaults;
         userScript = script;
         defaultNeededFor = defaultNeededFor;
         hostName = config.networking.hostName or "unknown-host";
@@ -87,7 +87,7 @@ let
     in
     {
       ${name} = {
-        inherit name share dependencies;
+        inherit share dependencies;
         files = builtins.removeAttrs filesAll [ "__defaultNeededFor" ];
         prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;

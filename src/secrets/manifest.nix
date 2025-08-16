@@ -54,13 +54,17 @@ in
         EOF
                 ${jq} '
                   .derivation.generatedAt = $ts
-                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "") + "/vars/${args.name}/" + .name)))
+                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "" end) + "/vars/${args.name}/" + .name)))
                 ' --arg ts "$gen_ts" "$tmp_manifest" > "$out/manifest.json"
                 rm -f "$tmp_manifest"
       '';
     in
     ''
       set -euo pipefail
+      # Provide a default empty prompts directory if not supplied by the runner
+      if [ -z "${"$"}{prompts:-}" ]; then
+        prompts="$(mktemp -d)"
+      fi
       ${args.userScript}
       ${post}
     '';

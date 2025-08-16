@@ -197,7 +197,7 @@ Behavior injected by constructors:
 - Adds a read-only file `manifest` to the generator outputs with `secret = false`, `mode = "0444"`
 - Wraps your `script` to emit `manifest.json` containing derivation metadata and resolved runtime paths
 - Adds `jq` to `PATH` for manifest processing
-- Captures per-file `additionalReaders` into `validation.acl.additionalReaders` for the ACL subsystem
+- Captures per-file `additionalReaders` into internal metadata for the ACL subsystem
 
 ### Module options
 
@@ -366,8 +366,7 @@ Minimal shape (illustrative):
   "store": { "secretStore": "…", "publicStore": "…" },
   "meta": {},
   "validation": {
-    "hostname": "host",
-    "acl": { "additionalReaders": { "key": ["alice"] } }
+    "hostname": "host"
   },
   "derivation": {
     "dependencies": [],
@@ -397,22 +396,6 @@ Minimal shape (illustrative):
     }
   ]
 }
-```
-
----
-
-## Repository layout
-
-```
-secrets-parts/
-flake.nix
-src/
-  secrets/
-    manifest.nix
-    lib.nix
-    expose-user.nix
-    module.nix
-    acl.nix
 ```
 
 ---

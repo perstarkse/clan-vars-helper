@@ -93,10 +93,8 @@ let
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
         validation = (validation // {
-          # Side-channel for module logic; safe to include in validation
-          acl = {
-            additionalReaders = additionalReadersByFile;
-          };
+          # JSON-encoded map fileName -> [ readers ] to satisfy Clan scalar-leaf constraint
+          _acl_additionalReaders = builtins.toJSON additionalReadersByFile;
         });
       };
     };

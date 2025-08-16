@@ -9,12 +9,13 @@ let
     let suffix = if neededFor == "users" then "-for-users" else "";
     in "/run/secrets${suffix}/vars/${name}/${file}";
 
-  # Collect ACL intentions from generators' validation.acl.additionalReaders (nested by generator)
+  # Collect ACL intentions from generators' validation._acl_additionalReaders (JSON string)
   aclIntentsFromGenerators = lib.mapAttrs
     (gname: gen:
       let
         files = gen.files or { };
-        readersByFile = (gen.validation or { }).acl.additionalReaders or { };
+        readersJson = (gen.validation or { })._acl_additionalReaders or null;
+        readersByFile = if readersJson == null then { } else builtins.fromJSON readersJson;
       in
       lib.mapAttrs
         (fname: fcfg:

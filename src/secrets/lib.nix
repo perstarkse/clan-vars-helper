@@ -73,17 +73,30 @@ let
       # Do not leak promptType or description into exported files schema for clan.core.vars.generators
       filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" "description" ]) filesWithDefaults;
 
-      filesAll = ensureManifestFile (filesForGenerator // { __defaultNeededFor = defaultNeededFor; });
+      filesBase = filesForGenerator // { __defaultNeededFor = defaultNeededFor; };
+      filesAll = if (config.my.secrets.generateManifest or true)
+        then ensureManifestFile filesBase
+        else filesBase;
 
       runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
-      wrappedScript = manifestLib.wrapScript {
-        inherit name scope share validation meta settings dependencies;
-        # Use the richer spec so the manifest JSON can include descriptive fields
-        filesSpec = filesWithDefaults;
-        userScript = script;
-        defaultNeededFor = defaultNeededFor;
-        hostName = config.networking.hostName or "unknown-host";
-      };
+      wrappedScript = if (config.my.secrets.generateManifest or true)
+        then manifestLib.wrapScript {
+          inherit name scope share validation meta settings dependencies;
+          # Use the richer spec so the manifest JSON can include descriptive fields
+          filesSpec = filesWithDefaults;
+          userScript = script;
+          defaultNeededFor = defaultNeededFor;
+          hostName = config.networking.hostName or "unknown-host";
+        }
+        else
+        # No manifest post-processing; just run the user script
+        ''
+          set -euo pipefail
+          if [ -z "${"$"}{prompts:-}" ]; then
+            prompts="$(mktemp -d)"
+          fi
+          ${script}
+        '';
     in
     {
       ${name} = {

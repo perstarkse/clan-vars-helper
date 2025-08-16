@@ -177,6 +177,12 @@ in
     values = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.value -> string or null (only for non-secret files)"; };
     valuesFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".value -> string or null (only for non-secret files)"; };
     getValue = mkOption { type = types.raw; default = getValueFun; readOnly = true; description = "Function: name -> file -> value (string) or null (only for non-secret files)"; };
+
+    generateManifest = mkOption {
+      type = types.bool;
+      default = true;
+      description = "If true, add a 'manifest' file to each generator and write a machine-readable manifest alongside outputs at runtime. Set to false to disable manifests entirely.";
+    };
   };
 
   config =

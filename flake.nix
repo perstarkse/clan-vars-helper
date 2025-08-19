@@ -22,7 +22,10 @@
 
       flake = {
         nixosModules = {
-          default = import ./src/secrets/module.nix;
+          default = import ./src/system/module.nix;
+        };
+        homeModules = {
+          default = import ./src/home/module.nix;
         };
       };
     };

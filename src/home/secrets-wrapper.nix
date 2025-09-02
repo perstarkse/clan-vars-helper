@@ -20,7 +20,7 @@ let
 						--unit='${name}' \
 						-p Description='${title}' \
 						-p LoadCredential='${envVar}':'${secretPath}' \
-						bash -lc "set -euo pipefail; if [ -n ''${CREDENTIALS_DIRECTORY:-} ] && [ -r ''${CREDENTIALS_DIRECTORY}/${envVar} ]; then export ${envVar}=\"$(cat ''${CREDENTIALS_DIRECTORY}/${envVar})\"; elif [ -r '${secretPath}' ]; then export ${envVar}=\"$(cat '${secretPath}')\"; fi; exec -a '${title}' '${command}' \"$@\"" bash "$@"
+						bash -lc "set -euo pipefail; if [ -n \"\''${CREDENTIALS_DIRECTORY:-}\" ] && [ -r \"\''${CREDENTIALS_DIRECTORY}/${envVar}\" ]; then export ${envVar}=\"\$(cat \"\''${CREDENTIALS_DIRECTORY}/${envVar}\")\"; elif [ -r '${secretPath}' ]; then export ${envVar}=\"\$(cat '${secretPath}')\"; fi; exec -a '${title}' '${command}' \"\$@\"" bash "$@"
 				''
 			else
 				pkgs.writeShellScriptBin name ''

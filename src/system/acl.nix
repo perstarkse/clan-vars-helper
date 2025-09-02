@@ -62,8 +62,6 @@ let
     in {
       paths."${unitBase}" = {
         wantedBy = [ "multi-user.target" ];
-        unitConfig.TriggerLimitIntervalSec = 30;
-        unitConfig.TriggerLimitBurst = 30;
         pathConfig = {
           # Trigger when the file content changes
           PathModified = item.path;

@@ -21,10 +21,6 @@ let
     in
     {
       wantedBy = [ "multi-user.target" ];
-      unitConfig = {
-        TriggerLimitIntervalSec = 10;
-        TriggerLimitBurst = 2;
-      };
       pathConfig = {
         # Trigger on content modifications and atomic replace/move operations
         PathModified = srcFile;

@@ -12,9 +12,9 @@ let
   };
 
   ensureManifestFile = files: files // {
-    manifest = {
+    "manifest.json" = {
       secret = false;
-      mode = "0444";
+      mode = "0400";
       owner = defaults.owner;
       group = defaults.group;
       deploy = true;

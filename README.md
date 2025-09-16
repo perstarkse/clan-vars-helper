@@ -194,7 +194,7 @@ Returns: an attrset keyed by `name`, suitable for inclusion in `my.secrets.decla
 
 Behavior injected by constructors:
 
-- Adds a read-only file `manifest` to the generator outputs with `secret = false`, `mode = "0444"`
+- Adds a read-only file `manifest.json` to the generator outputs with `secret = false`, `mode = "0400"`
 - Wraps your `script` to emit `manifest.json` containing derivation metadata and resolved runtime paths
 - Adds `jq` to `PATH` for manifest processing
 - Captures per-file `additionalReaders` into internal metadata for the ACL subsystem
@@ -385,14 +385,14 @@ Minimal shape (illustrative):
       "path": "/run/secrets-for-users/vars/openai-api-key/key"
     },
     {
-      "name": "manifest",
+      "name": "manifest.json",
       "secret": false,
       "owner": "root",
       "group": "root",
-      "mode": "0444",
+      "mode": "0400",
       "neededFor": "users",
       "description": "Machine-readable secret manifest",
-      "path": "/run/secrets-for-users/vars/openai-api-key/manifest"
+      "path": "/run/secrets-for-users/vars/openai-api-key/manifest.json"
     }
   ]
 }

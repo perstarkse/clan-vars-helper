@@ -56,6 +56,7 @@ in
                   .derivation.generatedAt = $ts
                   | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "" end) + "/vars/${args.name}/" + .name)))
                 ' --arg ts "$gen_ts" "$tmp_manifest" > "$out/manifest.json"
+                chmod 0400 "$out/manifest.json"
                 rm -f "$tmp_manifest"
       '';
     in

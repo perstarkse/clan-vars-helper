@@ -62,16 +62,10 @@ in
     in
     ''
       set -euo pipefail
-      echo "WRAPPER: Starting..." >&2
       # Provide a default empty prompts directory if not supplied by the runner
       if [ -z "${"$"}{prompts:-}" ]; then
-        echo "WRAPPER: prompts is unset/empty, creating temp dir..." >&2
         prompts="$(mktemp -d)"
-        echo "WRAPPER: prompts set to $prompts" >&2
-      else
-        echo "WRAPPER: prompts already set to '$prompts'" >&2
       fi
-      echo "WRAPPER: Running user script..." >&2
       ${args.userScript}
       ${post}
     '';

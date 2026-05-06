@@ -12,6 +12,7 @@ let
   concatMap = builtins.concatMap;
   isList = builtins.isList;
   isAttrs = builtins.isAttrs;
+  isFunction = builtins.isFunction;
   any = builtins.any;
   elem = builtins.elem;
   pathExists = p: builtins.pathExists p;
@@ -26,7 +27,9 @@ let
   discoverDirFiles = dir:
     let entries = attrNames (readDir dir);
     in filter (f: hasSuffix ".nix" f) entries;
-  importFile = dir: f: import (dir + "/${f}");
+  importFile = dir: f:
+    let imported = import (dir + "/${f}");
+    in if isFunction imported then imported { inherit config lib pkgs; } else imported;
   # Extract tags from either a top-level meta.tags, or from any inner generator object's meta.tags
   extractTags = gen:
     let

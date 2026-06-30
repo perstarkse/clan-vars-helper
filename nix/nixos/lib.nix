@@ -58,17 +58,24 @@ let
       # Capture optional per-file ACL readers from the original input (do not leak to exported files)
       additionalReadersByFile = lib.mapAttrs (_fname: fcfg: fcfg.additionalReaders or [ ]) files;
 
-      # Auto-generate prompts for files unless provided; user-provided prompts override auto.
+      # Auto-generate prompts for files that have an explicit promptType; user-provided prompts override auto.
       promptsAuto = lib.mapAttrs
-        (fname: fcfg: {
-          input = {
-            description = "${name} (${fname})";
-            type = if fcfg.promptType != null then fcfg.promptType else "hidden";
-            persist = false;
-          };
-        })
+        (fname: fcfg:
+          if fcfg.promptType != null then
+            {
+              input = {
+                description = "${name} (${fname})";
+                type = fcfg.promptType;
+                persist = false;
+              };
+            }
+          else
+            { }
+        )
         filesWithDefaults;
-      promptsFinal = lib.recursiveUpdate promptsAuto prompts;
+      # Remove empty entries from files that had no explicit promptType
+      promptsAutoClean = lib.filterAttrs (_: v: v != { }) promptsAuto;
+      promptsFinal = lib.recursiveUpdate promptsAutoClean prompts;
 
       # Do not leak promptType or description into exported files schema for clan.core.vars.generators
       filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" "description" ]) filesWithDefaults;

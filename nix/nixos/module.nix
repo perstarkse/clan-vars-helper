@@ -196,11 +196,9 @@ in
         then discoverFromDir discoverCfg.dir discoverCfg.includeTags discoverCfg.excludeTags
         else [ ];
       combinedDecls = config.my.secrets.declarations ++ discovered;
-      stripNonClan = decl: lib.mapAttrs (_n: gen: builtins.removeAttrs gen [ "prompts" ]) decl;
-      cleanedDecls = map stripNonClan combinedDecls;
     in
     {
-      clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) { } cleanedDecls;
+      clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) { } combinedDecls;
       my.secrets = {
         paths = nestedPaths;
         pathsFlat = flatPaths;

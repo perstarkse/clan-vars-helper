@@ -59,21 +59,22 @@ let
       additionalReadersByFile = lib.mapAttrs (_fname: fcfg: fcfg.additionalReaders or [ ]) files;
 
       # Auto-generate prompts for files that have an explicit promptType; user-provided prompts override auto.
+      # Clan-core expects the flat format: prompts.<file> = { description, type, persist, ... }
+      # (no `input` wrapper sub-attribute)
       promptsAuto = lib.mapAttrs
         (fname: fcfg:
           if fcfg.promptType != null then
             {
-              input = {
-                description = "${name} (${fname})";
-                type = fcfg.promptType;
-                persist = false;
-              };
+              description = "${name} (${fname})";
+              type = fcfg.promptType;
+              persist = false;
             }
           else
             { }
         )
         filesWithDefaults;
-      # Remove empty entries from files that had no explicit promptType
+      # Remove empty entries from files that had no explicit promptType so they don't
+      # leak null/empty prompts into clan-core's option validation.
       promptsAutoClean = lib.filterAttrs (_: v: v != { }) promptsAuto;
       promptsFinal = lib.recursiveUpdate promptsAutoClean prompts;
 

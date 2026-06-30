@@ -42,7 +42,7 @@ Add this flake as an input and import the module on your host. Then define a sim
               (config.my.secrets.mkUserSecret {
                 name = "openai-api-key";
                 files.key = { mode = "0400"; neededFor = "users"; };
-                prompts.key.input = {
+                prompts.key = {
                   description = "OpenAI API key";
                   type = "hidden";
                   persist = true;
@@ -78,7 +78,7 @@ Choose the style that fits your workflow. You can mix them.
     (config.my.secrets.mkUserSecret {
       name = "surrealdb-credentials";
       files.credentials = { mode = "0400"; neededFor = "users"; };
-      prompts.credentials.input = {
+      prompts.credentials = {
         description = "Content of the SurrealDB credentials environment file";
         type = "hidden";
         persist = true;
@@ -121,7 +121,7 @@ Choose the style that fits your workflow. You can mix them.
 
     "surrealdb-credentials" = {
       files.credentials = { mode = "0400"; neededFor = "users"; };
-      prompts.credentials.input = {
+      prompts.credentials = {
         description = "Content of the SurrealDB credentials environment file";
         type = "hidden";
         persist = true;
@@ -181,7 +181,8 @@ Common arguments for all three constructors:
   - `promptType` ("hidden" | "multiline-hidden", default "hidden")
   - `additionalReaders` (list of strings, default `[]`): grant user read ACLs to the deployed file
 - **prompts** (attrs, default auto-generated)
-  - Auto: `prompts.<file>.input = { description = "${name} (${file})"; type = promptType; persist = false; }`
+  - Clan-core flat format: `prompts.<file> = { description, type, persist }` (no `input` wrapper)
+  - Auto: `prompts.<file> = { description = "${name} (${file})"; type = promptType; persist = false; }`
   - Provide a subset to override
 - **script** (bash string, required): writes outputs into `$out/<file>`
 - **runtimeInputs** (list of pkgs, default `[ ]` plus `jq`)
@@ -246,7 +247,7 @@ Grant per-user read access to root-owned deployed files without duplicating secr
         neededFor = "users"; # deploys under /run/secrets-for-users/vars/...
         additionalReaders = [ "alice" ]; # grant read ACL to these users
       };
-      prompts.aws_access_key_id.input = {
+      prompts.aws_access_key_id = {
         description = "AWS access key ID";
         persist = true;
         type = "hidden";
@@ -541,8 +542,8 @@ EOF
 ## Dev shell
 
 ```
-$ nix develop
-$ nix fmt
+nix develop
+nix fmt
 ```
 
 ## License

@@ -15,8 +15,8 @@ let
     "manifest.json" = {
       secret = false;
       mode = "0400";
-      owner = defaults.owner;
-      group = defaults.group;
+      inherit (defaults) owner;
+      inherit (defaults) group;
       deploy = true;
       neededFor = files.__defaultNeededFor or "services";
     };
@@ -41,10 +41,10 @@ let
     let
       # Accept extra per-file attribute `promptType` (e.g., "hidden", "multiline-hidden")
       filesWithDefaults = lib.mapAttrs
-        (fname: fcfg:
+        (_: fcfg:
           {
-            deploy = if fcfg ? deploy then fcfg.deploy else true;
-            secret = if fcfg ? secret then fcfg.secret else true;
+            deploy = fcfg.deploy or true;
+            secret = fcfg.secret or true;
             owner = fcfg.owner or defaults.owner;
             group = fcfg.group or defaults.group;
             mode = fcfg.mode or defaults.mode;
@@ -74,29 +74,33 @@ let
       filesForGenerator = lib.mapAttrs (_: fcfg: builtins.removeAttrs fcfg [ "promptType" "description" ]) filesWithDefaults;
 
       filesBase = filesForGenerator // { __defaultNeededFor = defaultNeededFor; };
-      filesAll = if (config.my.secrets.generateManifest or true)
+      filesAll =
+        if (config.my.secrets.generateManifest or true)
         then ensureManifestFile filesBase
         else filesBase;
 
       runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
-      wrappedScript = if (config.my.secrets.generateManifest or true)
-        then manifestLib.wrapScript {
-          inherit name scope share validation meta settings dependencies;
-          # Use the richer spec so the manifest JSON can include descriptive fields
-          filesSpec = filesWithDefaults;
-          userScript = script;
-          defaultNeededFor = defaultNeededFor;
-          hostName = config.networking.hostName or "unknown-host";
-        }
+      wrappedScript =
+        if (config.my.secrets.generateManifest or true)
+        then
+          manifestLib.wrapScript
+            {
+              inherit name scope share validation meta settings dependencies;
+              # Use the richer spec so the manifest JSON can include descriptive fields
+              filesSpec = filesWithDefaults;
+              userScript = script;
+              inherit defaultNeededFor;
+              hostName = config.networking.hostName or "unknown-host";
+            }
         else
         # No manifest post-processing; just run the user script
-        ''
-          set -euo pipefail
-          if [ -z "${"$"}{prompts:-}" ]; then
-            prompts="$(mktemp -d)"
-          fi
-          ${script}
-        '';
+          ''
+            set -euo pipefail
+            if [ -z "${"$"}{prompts:-}" ]; then
+              prompts="$(mktemp -d)"
+            fi
+            ${script}
+          '';
     in
     {
       ${name} = {
@@ -105,10 +109,10 @@ let
         prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
-        validation = (validation // {
+        validation = validation // {
           # JSON-encoded map fileName -> [ readers ] to satisfy Clan scalar-leaf constraint
           _acl_additionalReaders = builtins.toJSON additionalReadersByFile;
-        });
+        };
       };
     };
 

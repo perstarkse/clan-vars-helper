@@ -1,20 +1,20 @@
 { lib, pkgs, config, ... }:
 let
   manifestLib = import ./manifest.nix { inherit lib pkgs; };
-  libImpl = import ./lib.nix { inherit lib pkgs config; manifestLib = manifestLib; };
-  types = lib.types;
-  mkOption = lib.mkOption;
-  hasSuffix = lib.hasSuffix;
-  readDir = builtins.readDir;
-  attrNames = builtins.attrNames;
-  filter = builtins.filter;
-  map = builtins.map;
-  concatMap = builtins.concatMap;
-  isList = builtins.isList;
-  isAttrs = builtins.isAttrs;
-  isFunction = builtins.isFunction;
-  any = builtins.any;
-  elem = builtins.elem;
+  libImpl = import ./lib.nix { inherit lib pkgs config; inherit manifestLib; };
+  inherit (lib) types;
+  inherit (lib) mkOption;
+  inherit (lib) hasSuffix;
+  inherit (builtins) readDir;
+  inherit (builtins) attrNames;
+  inherit (builtins) filter;
+  inherit (builtins) map;
+  inherit (builtins) concatMap;
+  inherit (builtins) isList;
+  inherit (builtins) isAttrs;
+  inherit (builtins) isFunction;
+  inherit (builtins) any;
+  inherit (builtins) elem;
   pathExists = p: builtins.pathExists p;
   defaultDiscoverDir = ./../../vars/generators;
   normalizeGenerators = x:
@@ -51,7 +51,7 @@ let
     in
     lib.mapAttrs
       (
-        name: value:
+        _: value:
           if isAttrs value then builtins.removeAttrs value [ "meta" ] else value
       )
       noTopMeta;
@@ -82,7 +82,7 @@ let
     (name: gen:
       lib.mapAttrs
         (fname: fcfg: {
-          path = runtimePath name fname (if fcfg ? neededFor then fcfg.neededFor else "services");
+          path = runtimePath name fname (fcfg.neededFor or "services");
         })
         gen.files
     )
@@ -96,10 +96,10 @@ let
             fname: fcfg:
               {
                 name = "${name}.${fname}";
-                value = { path = runtimePath name fname (if fcfg ? neededFor then fcfg.neededFor else "services"); };
+                value = { path = runtimePath name fname (fcfg.neededFor or "services"); };
               }
           )
-          (gens.${name}.files)
+          gens.${name}.files
       )
       (attrNames gens)
   );
@@ -108,13 +108,13 @@ let
       n = if builtins.hasAttr name nestedPaths then builtins.getAttr name nestedPaths else { };
       f = if builtins.hasAttr file n then builtins.getAttr file n else { };
     in
-    if f ? path then f.path else null;
+      f.path or null;
 
   # Expose non-secret values (if available via clan.core.vars).
   nestedValues = lib.mapAttrs
-    (name: gen:
+    (_: gen:
       lib.mapAttrs
-        (fname: fcfg: {
+        (_: fcfg: {
           value = if (fcfg ? secret && fcfg.secret == false) then (fcfg.value or null) else null;
         })
         gen.files
@@ -132,7 +132,7 @@ let
                 value = { value = if (fcfg ? secret && fcfg.secret == false) then (fcfg.value or null) else null; };
               }
           )
-          (gens.${name}.files)
+          gens.${name}.files
       )
       (attrNames gens)
   );
@@ -141,7 +141,7 @@ let
       n = if builtins.hasAttr name nestedValues then builtins.getAttr name nestedValues else { };
       f = if builtins.hasAttr file n then builtins.getAttr file n else { };
     in
-    if f ? value then f.value else null;
+      f.value or null;
 
 in
 {
@@ -201,9 +201,11 @@ in
     in
     {
       clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) { } cleanedDecls;
-      my.secrets.paths = nestedPaths;
-      my.secrets.pathsFlat = flatPaths;
-      my.secrets.values = nestedValues;
-      my.secrets.valuesFlat = flatValues;
+      my.secrets = {
+        paths = nestedPaths;
+        pathsFlat = flatPaths;
+        values = nestedValues;
+        valuesFlat = flatValues;
+      };
     };
 }

@@ -21,9 +21,9 @@ in
         args.filesSpec;
 
       manifestObj = {
-        name = args.name;
-        scope = args.scope;
-        share = args.share;
+        inherit (args) name;
+        inherit (args) scope;
+        inherit (args) share;
         neededFor = args.defaultNeededFor;
         store = {
           secretStore = args.settings.secretStore;

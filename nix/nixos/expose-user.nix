@@ -1,11 +1,10 @@
-{ lib, pkgs, config, ... }:
+{ lib, config, ... }:
 let
   inherit (lib) mkIf mkOption types listToAttrs filter map;
   cfgSingle = config.my.secrets.exposeUserSecret or null;
   cfgList = config.my.secrets.exposeUserSecrets or [ ];
   defaultDest = user: secret: file: "/var/lib/user-secrets/${user}/${secret}/${file}";
   mkServiceName = es: "my-expose-user-secret-${es.user}-${es.secretName}-${es.file}";
-  ensureString = v: if builtins.isString v then v else toString v;
 
   # Enabled entries combined from single (legacy) and list (new)
   allEntries =

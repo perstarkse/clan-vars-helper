@@ -1,7 +1,7 @@
 { lib, pkgs, config, options, ... }:
 let
-  types = lib.types;
-  mkOption = lib.mkOption;
+  inherit (lib) types;
+  inherit (lib) mkOption;
   gens = config.clan.core.vars.generators;
 
   # Resolve the runtime path of a file (mirrors module.nix)
@@ -20,9 +20,10 @@ let
       lib.mapAttrs
         (fname: fcfg:
           let
-            path = runtimePath gname fname (if fcfg ? neededFor then fcfg.neededFor else "services");
+            path = runtimePath gname fname (fcfg.neededFor or "services");
             readers = readersByFile.${fname} or [ ];
-          in {
+          in
+          {
             inherit path readers;
           }
         )
@@ -33,13 +34,15 @@ let
   # Flatten into a list of { name, file, path, readers }
   aclItemsFromGenerators = lib.concatMap
     (gname:
-      lib.mapAttrsToList (
-        fname: v: {
-          name = gname;
-          file = fname;
-          inherit (v) path readers;
-        }
-      ) (aclIntentsFromGenerators.${gname} or { })
+      lib.mapAttrsToList
+        (
+          fname: v: {
+            name = gname;
+            file = fname;
+            inherit (v) path readers;
+          }
+        )
+        (aclIntentsFromGenerators.${gname} or { })
     )
     (builtins.attrNames aclIntentsFromGenerators);
 
@@ -59,7 +62,8 @@ let
       sanitized = builtins.replaceStrings [ "/" ":" "." " " ] [ "-" "-" "-" "-" ] item.path;
       hash = builtins.substring 0 10 (builtins.hashString "sha256" item.path);
       unitBase = "my-secrets-acl-${prefix}-${sanitized}-${hash}";
-    in {
+    in
+    {
       paths."${unitBase}" = {
         wantedBy = [ "multi-user.target" ];
         pathConfig = {
@@ -85,8 +89,8 @@ let
         script =
           let
             setfacl = lib.getExe' pkgs.acl "setfacl";
-            getfacl = lib.getExe' pkgs.acl "getfacl";
-          in ''
+          in
+          ''
             set -euo pipefail
             if [ -e "${item.path}" ]; then
               # Apply unconditionally; setfacl is idempotent for identical rule
@@ -97,13 +101,19 @@ let
     };
 
   # Create units for generator-driven ACLs (skip items with no readers)
-  genUnits = lib.foldl' (acc: item:
-    if (item.readers or [ ]) == [ ] then acc else lib.recursiveUpdate acc (mkUnitsForItem "gen" item)
-  ) { } aclItemsFromGenerators;
+  genUnits = lib.foldl'
+    (acc: item:
+      if (item.readers or [ ]) == [ ] then acc else lib.recursiveUpdate acc (mkUnitsForItem "gen" item)
+    )
+    { }
+    aclItemsFromGenerators;
 
-  manualUnits = lib.foldl' (acc: item:
-    if (item.readers or [ ]) == [ ] then acc else lib.recursiveUpdate acc (mkUnitsForItem "manual" item)
-  ) { } manualAclsFiltered;
+  manualUnits = lib.foldl'
+    (acc: item:
+      if (item.readers or [ ]) == [ ] then acc else lib.recursiveUpdate acc (mkUnitsForItem "manual" item)
+    )
+    { }
+    manualAclsFiltered;
 
   combinedUnits = lib.recursiveUpdate genUnits manualUnits;
 
@@ -120,17 +130,22 @@ in
     description = "Manually specify ACLs for arbitrary file paths (applied via setfacl).";
   };
 
-  config = {
-    # Ensure ACL binaries are present
-    environment.systemPackages = lib.mkIf (combinedUnits != { }) [ pkgs.acl ];
+  config = lib.mkMerge (
+    [
+      {
+        # Ensure ACL binaries are present
+        environment.systemPackages = lib.mkIf (combinedUnits != { }) [ pkgs.acl ];
 
-    # If sops-nix is present, switch it to tmpfs when ACLs are requested under /run/secrets-for-users
-    sops.useTmpfs = lib.mkIf enableSopsTmpfs (lib.mkDefault true);
-
-    # Ensure the directory exists in case nothing else creates it
-    systemd.tmpfiles.rules = lib.mkIf needsUsersAcl [ "d /run/secrets-for-users 0755 root root -" ];
-
-    systemd.paths = lib.mkMerge [ combinedUnits.paths or { } ];
-    systemd.services = lib.mkMerge [ combinedUnits.services or { } ];
-  };
-} 
+        systemd = {
+          tmpfiles.rules = lib.mkIf needsUsersAcl [ "d /run/secrets-for-users 0755 root root -" ];
+          paths = lib.mkMerge [ combinedUnits.paths or { } ];
+          services = lib.mkMerge [ combinedUnits.services or { } ];
+        };
+      }
+    ]
+    ++ lib.optional (options ? sops) {
+      # If sops-nix is present, switch it to tmpfs when ACLs are requested under /run/secrets-for-users
+      sops.useTmpfs = lib.mkIf enableSopsTmpfs (lib.mkDefault true);
+    }
+  );
+}

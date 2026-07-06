@@ -137,7 +137,10 @@ in
         environment.systemPackages = lib.mkIf (combinedUnits != { }) [ pkgs.acl ];
 
         systemd = {
-          tmpfiles.rules = lib.mkIf needsUsersAcl [ "d /run/secrets-for-users 0755 root root -" ];
+          # sops-nix useTmpfs owns /run/secrets-for-users as a versioned symlink.
+          tmpfiles.rules = lib.mkIf (needsUsersAcl && !enableSopsTmpfs) [
+            "d /run/secrets-for-users 0755 root root -"
+          ];
           paths = lib.mkMerge [ combinedUnits.paths or { } ];
           services = lib.mkMerge [ combinedUnits.services or { } ];
         };

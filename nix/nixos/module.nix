@@ -166,7 +166,7 @@ in
     declarations = mkOption {
       type = types.listOf types.attrs;
       default = [ ];
-      description = "List of helper-produced generator attrsets to merge into clan.core.vars.generators.";
+      description = "List of helper-produced generator attrsets to merge into clan.core.vars.generators. Each declaration must be an attrset of generator specs (asserted: name -> { files, script, ... }).";
     };
 
     discover = mkOption {
@@ -283,6 +283,13 @@ in
       dupNames = lib.unique (filter (n: lib.count (m: m == n) allDeclNames > 1) allDeclNames);
       mergedGenerators = lib.foldl' (acc: decl: acc // decl) { } combinedDecls;
       missingRequired = filter (n: !(builtins.hasAttr n gens)) config.my.secrets.requireGenerators;
+      # R5.1 seam assertions: declarations must be attrsets of attrsets
+      # (catches mk*Secret typos like a list element being a function, or
+      # files declared at the wrong depth). Discovered decls are normalized
+      # to lists of attrsets already, so this covers both styles.
+      malformedDecls = filter
+        (decl: !(isAttrs decl) || builtins.any (n: !(isAttrs (builtins.getAttr n decl))) (attrNames decl))
+        combinedDecls;
       # R4.1 fallback: the sidecar key belongs to the ACL subsystem
       # (lib.nix injects it). A consumer-supplied copy would be silently
       # overwritten by the merge there — fail closed. Scans the raw
@@ -308,6 +315,10 @@ in
         valuesFlat = flatValues;
       };
       assertions = [
+        {
+          assertion = malformedDecls == [ ];
+          message = "my.secrets.declarations: every declaration must be an attrset of generator attrsets (name -> { files, script, ... }); got a malformed entry (function? wrong depth?). Count: ${toString (builtins.length malformedDecls)}.";
+        }
         {
           assertion = reservedSidecarDecls == [ ];
           message = "my.secrets: validation._acl_additionalReaders is reserved for the ACL sidecar; pass per-file additionalReaders instead.";

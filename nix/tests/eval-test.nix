@@ -393,6 +393,20 @@ let
       })
     ];
   };
+
+  # Phase 5: malformed declarations fail closed with a helpful message
+  malformedSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.declarations = [
+          (_: { })
+        ];
+      }
+    ];
+  };
   revokedUnits =
     builtins.listToAttrs
       (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
@@ -452,5 +466,7 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH4 no-jq: ${if builtins.elem pkgs.jq noManifestGen.runtimeInputs then throw "jq shipped with generateManifest=false" else "jq-free"}"
   echo "PH4 sidecar guard: ${expectThrow "validation._acl_additionalReaders rejected" sidecarSys.config.system.build.toplevel.drvPath}"
   echo "PH4 sops tmpfs flips: ${if sopsSys.config.sops.useTmpfs then "auto-enabled" else throw "sops.useTmpfs not auto-enabled for users-run ACL"}"
+  # Phase 5: malformed declaration (function, not attrset) fails closed
+  echo "PH5 malformed declarations: ${expectThrow "function declaration rejected" malformedSys.config.system.build.toplevel.drvPath}"
   touch $out
 ''

@@ -18,6 +18,7 @@ This repository provides a reusable Flake Parts/NixOS module exposing a small he
 - **Non-secret values**: convenient accessors for files with `secret = false`
 - **ACL helpers**: per-file `additionalReaders` or manual `allowReadAccess`
 - **Rotation watchers**: `my.secrets.mkRestartOnRotation` / `mkTryRestartOnRotation` codify the two proven rotation shapes (restart vs try-restart)
+- **Typed home wrappers**: `wrappedHomeBinaries` entries are a submodule (`useSystemdRun` defaults to true; `false` with a secret path warns — store-visible)
 
 ---
 

@@ -30,7 +30,9 @@ let
   importFile = dir: f:
     let imported = import (dir + "/${f}");
     in if isFunction imported then imported { inherit config lib pkgs; } else imported;
-  # Extract tags from either a top-level meta.tags, or from any inner generator object's meta.tags
+  # Union of top-level meta.tags and any inner generator object's meta.tags.
+  # Union (not top-wins) matches secrets-discovery-check.py, which unions
+  # every tags=[...] list in the file.
   extractTags = gen:
     let
       topLevelTags = if gen ? meta && gen.meta ? tags then gen.meta.tags else [ ];
@@ -43,7 +45,7 @@ let
         )
         innerNames;
     in
-    if topLevelTags != [ ] then topLevelTags else innerTags;
+    topLevelTags ++ innerTags;
   # Remove any meta attribute present at the top-level of a declaration and within its immediate generator objects
   stripMeta = decl:
     let
@@ -72,10 +74,8 @@ let
     in
     cleaned;
 
-  # Compute runtime path used on target (vars layout)
-  runtimePath = name: file: neededFor:
-    let suffix = if neededFor == "users" then "-for-users" else "";
-    in "/run/secrets${suffix}/vars/${name}/${file}";
+  # Runtime path used on target (vars layout); shared with acl.nix and expose-user.nix.
+  runtimePath = import ./runtime-path.nix;
 
   gens = config.clan.core.vars.generators;
   nestedPaths = lib.mapAttrs

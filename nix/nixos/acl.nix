@@ -4,10 +4,8 @@ let
   inherit (lib) mkOption;
   gens = config.clan.core.vars.generators;
 
-  # Resolve the runtime path of a file (mirrors module.nix)
-  runtimePath = name: file: neededFor:
-    let suffix = if neededFor == "users" then "-for-users" else "";
-    in "/run/secrets${suffix}/vars/${name}/${file}";
+  # Resolve the runtime path of a file (shared with module.nix).
+  runtimePath = import ./runtime-path.nix;
 
   # Collect ACL intentions from generators' validation._acl_additionalReaders (JSON string)
   aclIntentsFromGenerators = lib.mapAttrs

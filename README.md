@@ -10,7 +10,7 @@ This repository provides a reusable Flake Parts/NixOS module exposing a small he
 
 - **Module export**: drop-in `nixosModules.default` for easy reuse
 - **Constructors**: `my.secrets.mkSharedSecret`, `mkMachineSecret`, `mkUserSecret`
-- **Auto manifest**: `/run/secrets[-for-users]/<name>/manifest.json`
+- **Auto manifest**: `/run/secrets[-for-users]/vars/<name>/manifest.json`
 - **Optional discovery**: import raw declarations from `vars/generators` by tags
 - **Expose to users**: `my.secrets.exposeUserSecrets` (preferred) or `exposeUserSecret`
 - **Path helpers**: reference deployed secret file paths directly from Nix
@@ -145,7 +145,7 @@ Choose the style that fits your workflow. You can mix them.
 
 - **Constructors wrap raw declarations**: inject defaults, generate prompts, add `jq` to `PATH`, and append a read-only machine-readable manifest file to each generator’s files.
 - **Runtime layout**: deployed files live under `/run/secrets/vars/<name>/<file>` for `services` and `/run/secrets-for-users/vars/<name>/<file>` for `users`.
-- **Manifests**: a JSON file `/run/secrets[-for-users]/<name>/manifest.json` is written by the wrapped script after your `script` runs. Paths in the manifest include the `vars` segment to reflect runtime layout.
+- **Manifests**: a JSON file `/run/secrets[-for-users]/vars/<name>/manifest.json` is written by the wrapped script after your `script` runs. Paths in the manifest include the `vars` segment to reflect runtime layout.
 - **Values**: files declared with `secret = false` expose their contents as strings under Clan’s canonical location, mirrored by helper accessors.
 - **ACLs**: per-file user read access can be granted without duplication via `additionalReaders` or manual `allowReadAccess` items; implemented with systemd triggers and `setfacl`.
 - **Expose-to-user**: optional systemd units copy a user-scoped secret file into a user-owned destination.
@@ -353,7 +353,7 @@ config.my.secrets.valuesFlat."example.public".value
 
 ## Manifest
 
-- Path: `/run/secrets/<name>/manifest.json` or `/run/secrets-for-users/<name>/manifest.json` when any file has `neededFor = "users"`
+- Path: `/run/secrets/vars/<name>/manifest.json` or `/run/secrets-for-users/vars/<name>/manifest.json` when any file has `neededFor = "users"`
 - Contents: name, scope, share, store settings, `derivation` info (`hostname`, `generatedAt`, `dependencies`), and `files` with final deploy paths
 
 Minimal shape (illustrative):
@@ -398,6 +398,15 @@ Minimal shape (illustrative):
   ]
 }
 ```
+
+## Production without manifests
+
+The fleet runs with `generateManifest = false` (no `manifest.json` is
+deployed). To debug a secret on the target host, inspect the deployed files
+directly under `/run/secrets/vars/<name>/` (or `/run/secrets-for-users/vars/<name>/`
+for `users`-scoped files) and compare with the generator source in
+`vars/generators/`. Whether manifests should be re-enabled or stay off is an
+open decision; the cost argument for keeping them off has not been recorded.
 
 ---
 

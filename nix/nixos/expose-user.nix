@@ -4,6 +4,8 @@ let
   cfgSingle = config.my.secrets.exposeUserSecret or null;
   cfgList = config.my.secrets.exposeUserSecrets or [ ];
   defaultDest = user: secret: file: "/var/lib/user-secrets/${user}/${secret}/${file}";
+  # Source path of a user-scoped deployed file (shared with module.nix).
+  runtimePath = import ./runtime-path.nix;
   mkServiceName = es: "my-expose-user-secret-${es.user}-${es.secretName}-${es.file}";
 
   # Enabled entries combined from single (legacy) and list (new)
@@ -15,8 +17,8 @@ let
 
   mkPathUnit = es:
     let
-      srcDir = "/run/secrets-for-users/vars/${es.secretName}";
-      srcFile = "${srcDir}/${es.file}";
+      srcFile = runtimePath es.secretName es.file "users";
+      srcDir = builtins.dirOf srcFile;
     in
     {
       wantedBy = [ "multi-user.target" ];
@@ -29,8 +31,7 @@ let
 
   mkServiceUnit = es:
     let
-      srcDir = "/run/secrets-for-users/vars/${es.secretName}";
-      srcFile = "${srcDir}/${es.file}";
+      srcFile = runtimePath es.secretName es.file "users";
       destPath = if (es.dest or "") != "" then es.dest else defaultDest es.user es.secretName es.file;
       destDir = "$(dirname '${destPath}')";
     in

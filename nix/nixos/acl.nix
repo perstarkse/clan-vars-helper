@@ -102,7 +102,8 @@ let
       };
     };
 
-  # Create units for generator-driven ACLs (skip items with no readers)
+  # Create units for generator-driven ACLs (empty readers are skipped here;
+  # with revokeStaleAcls below they become setfacl -x revokers)
   genUnits = lib.foldl'
     (acc: item:
       if (item.readers or [ ]) == [ ] then acc else lib.recursiveUpdate acc (mkUnitsForItem "gen" item)
@@ -119,17 +120,69 @@ let
 
   combinedUnits = lib.recursiveUpdate genUnits manualUnits;
 
+  # R3.1 revocation: readers removed from config leave the ACL on disk
+  # (setfacl -m only adds). With revokeStaleAcls, empty-readers entries
+  # emit a one-shot setfacl -x revoker instead of being skipped. Off by
+  # default: a revoker for a generator whose readers live in another config
+  # would strip live ACLs — opt in per machine after auditing that all
+  # readers live here.
+  emptyItems =
+    (lib.filter (item: (item.readers or [ ]) == [ ]) aclItemsFromGenerators)
+    ++ (lib.filter (item: (item.readers or [ ]) == [ ]) manualAclsFiltered);
+  mkRevokerForItem = prefix: item:
+    let
+      sanitized = builtins.replaceStrings [ "/" ":" "." " " ] [ "-" "-" "-" "-" ] item.path;
+      hash = builtins.substring 0 10 (builtins.hashString "sha256" item.path);
+      unitBase = "my-secrets-acl-revoke-${prefix}-${sanitized}-${hash}";
+    in
+    {
+      services."${unitBase}" = {
+        description = "Revoke stale ACL for ${item.path}";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "local-fs.target" ];
+        unitConfig = {
+          StartLimitIntervalSec = 300;
+          StartLimitBurst = 60;
+        };
+        serviceConfig = {
+          Type = "oneshot";
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+        script =
+          let
+            setfacl = lib.getExe' pkgs.acl "setfacl";
+          in
+          ''
+            set -euo pipefail
+            if [ -e "${item.path}" ]; then
+              ${setfacl} -x "${item.path}"
+            fi
+          '';
+      };
+    };
+  revokerUnits =
+    if config.my.secrets.revokeStaleAcls then
+      lib.foldl' (acc: item: lib.recursiveUpdate acc (mkRevokerForItem "manual" item)) { } emptyItems
+    else { };
+
 in
 {
   options.my.secrets.allowReadAccess = mkOption {
     type = types.listOf (types.submodule {
       options = {
         path = mkOption { type = types.str; description = "Absolute path to the file to grant read access for"; };
-        readers = mkOption { type = types.listOf types.str; default = [ ]; description = "Users to grant read ACL (r)"; };
+        readers = mkOption { type = types.listOf types.str; default = [ ]; description = "Users to grant read ACL (r). Empty + revokeStaleAcls emits a setfacl -x revoker."; };
       };
     });
     default = [ ];
     description = "Manually specify ACLs for arbitrary file paths (applied via setfacl).";
+  };
+
+  options.my.secrets.revokeStaleAcls = mkOption {
+    type = types.bool;
+    default = false;
+    description = "Emit setfacl -x revoker units for empty-readers entries. Opt in per machine only after auditing that all readers live in this config.";
   };
 
   config = lib.mkMerge (
@@ -144,7 +197,7 @@ in
             "d /run/secrets-for-users 0755 root root -"
           ];
           paths = lib.mkMerge [ combinedUnits.paths or { } ];
-          services = lib.mkMerge [ combinedUnits.services or { } ];
+          services = lib.mkMerge [ combinedUnits.services or { } revokerUnits.services or { } ];
         };
       }
     ]

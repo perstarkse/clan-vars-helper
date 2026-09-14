@@ -215,6 +215,61 @@ let
     ];
   };
 
+  revokedSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.allowReadAccess = [
+          { path = "/run/secrets/vars/revoked-secret/token"; readers = [ ]; }
+        ];
+      }
+    ];
+  };
+
+  revokeSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.allowReadAccess = [
+          { path = "/run/secrets/vars/revoked-secret/token"; readers = [ ]; }
+        ];
+        my.secrets.revokeStaleAcls = true;
+      }
+    ];
+  };
+
+  rotationSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      ({ config, ... }: {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.declarations = [
+          (config.my.secrets.mkSharedSecret {
+            name = "rotation-secret";
+            files.env = { };
+            script = "echo test > $out/env";
+            requiredPrompts = [ "env" ];
+          })
+        ];
+        systemd.paths = (config.my.secrets.mkTryRestartOnRotation {
+          service = "demo-svc";
+          secretName = "rotation-secret";
+          file = "env";
+        }).paths;
+        systemd.services = (config.my.secrets.mkTryRestartOnRotation {
+          service = "demo-svc";
+          secretName = "rotation-secret";
+          file = "env";
+        }).services;
+      })
+    ];
+  };
+
   gens = nixosSystem.config.clan.core.vars.generators;
   discoverGens = discoverSys.config.clan.core.vars.generators;
   getPath = nixosSystem.config.my.secrets.getPath;
@@ -248,6 +303,15 @@ let
       actual = (builtins.getAttr unit units).unitConfig.${field} or (builtins.getAttr unit units).pathConfig.${field} or null;
     in
     if actual == expected then toString actual else throw "unit ${unit} field ${field}: got ${toString actual}, want ${toString expected}";
+  revokerUnits =
+    builtins.listToAttrs
+      (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
+        (lib.mapAttrsToList lib.nameValuePair revokeSys.config.systemd.services));
+  revokedUnits =
+    builtins.listToAttrs
+      (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
+        (lib.mapAttrsToList lib.nameValuePair revokedSys.config.systemd.services));
+  strictGen = rotationSys.config.clan.core.vars.generators.rotation-secret;
 in
 pkgs.runCommand "nixos-eval-test" { } ''
   echo "Evaluating NixOS Module..."
@@ -281,5 +345,12 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH2 bad mode: ${expectThrow "mode 0644 rejected" badModeSys.config.system.build.toplevel.drvPath}"
   echo "PH2 relative dest: ${expectThrow "relative dest rejected" relDestSys.config.system.build.toplevel.drvPath}"
   echo "PH2 outside dest: ${expectThrow "/etc/evil rejected" outsideDestSys.config.system.build.toplevel.drvPath}"
+  # Phase 3: empty readers + revokeStaleAcls emits a setfacl -x revoker
+  echo "PH3 revoker count: ${toString (builtins.length (builtins.attrNames revokerUnits))} (expect 1)"
+  echo "PH3 revoker content: ${let u = builtins.head (builtins.attrValues revokerUnits); in if lib.hasInfix "setfacl -x" u.script then "revokes" else throw "revoker unit lacks 'setfacl -x'"}"
+  echo "PH3 no-revoker by default: ${if revokedUnits == { } then "skipped" else throw "revoker emitted without revokeStaleAcls"}"
+  echo "PH3 required prompts: ${if lib.hasInfix "required prompt" strictGen.script then "loud" else throw "requiredPrompts check missing from script"}"
+  echo "PH3 watcher path: ${let p = rotationSys.config.systemd.paths.demo-svc-env-rotation.pathConfig; in if p.Unit == "demo-svc-env-rotation-restart.service" && p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" ] then "watches" else throw "rotation path unit miswired"}"
+  echo "PH3 watcher exec: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "try-restart demo-svc.service" s.ExecStart then "try-restarts" else throw "rotation restarter miswired"}"
   touch $out
 ''

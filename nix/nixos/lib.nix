@@ -36,7 +36,7 @@ let
     , validation ? { }
     , meta ? { }
     , defaultNeededFor ? (if scope == "user" then "users" else "services")
-    ,
+    , requiredPrompts ? [ ] # fail the generator loudly when any of these $prompts/<file> is missing
     }:
     let
       # Accept extra per-file attribute `promptType` (e.g., "hidden", "multiline-hidden")
@@ -88,12 +88,26 @@ let
         else filesBase;
 
       runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
+      # R3.3: fail loudly when a required prompt is missing/empty instead of
+      # falling through to silent prompt-less output (or shared-constant
+      # fallbacks). Checked at generator runtime, before the user script.
+      requiredPromptsCheck =
+        if requiredPrompts == [ ] then ""
+        else
+          lib.concatMapStrings
+            (f: ''
+              if [ ! -s "$prompts/${f}" ]; then
+                echo "${name}: required prompt $prompts/${f} is missing or empty" >&2
+                exit 1
+              fi
+            '')
+            requiredPrompts;
       wrappedScript =
         if (config.my.secrets.generateManifest or true)
         then
           manifestLib.wrapScript
             {
-              inherit name scope share validation meta settings dependencies;
+              inherit name scope share validation meta settings dependencies requiredPrompts;
               # Use the richer spec so the manifest JSON can include descriptive fields
               filesSpec = filesWithDefaults;
               userScript = script;
@@ -107,6 +121,7 @@ let
             if [ -z "${"$"}{prompts:-}" ]; then
               prompts="$(mktemp -d)"
             fi
+            ${requiredPromptsCheck}
             ${script}
           '';
     in

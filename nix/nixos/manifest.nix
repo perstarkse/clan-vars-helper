@@ -44,6 +44,18 @@ in
           filesArr;
       };
       manifestJSONStatic = json manifestObj;
+      # R3.3 (manifest branch): same loud required-prompts gate as lib.nix.
+      requiredPromptsCheck =
+        if (args.requiredPrompts or [ ]) == [ ] then ""
+        else
+          lib.concatMapStrings
+            (f: ''
+              if [ ! -s "$prompts/${f}" ]; then
+                echo "${args.name}: required prompt $prompts/${f} is missing or empty" >&2
+                exit 1
+              fi
+            '')
+            (args.requiredPrompts or [ ]);
       post = ''
                 set -euo pipefail
                 gen_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -66,6 +78,7 @@ in
       if [ -z "${"$"}{prompts:-}" ]; then
         prompts="$(mktemp -d)"
       fi
+      ${requiredPromptsCheck}
       ${args.userScript}
       ${post}
     '';

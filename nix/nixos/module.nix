@@ -186,6 +186,54 @@ in
     mkMachineSecret = mkOption { type = types.raw; default = libImpl.mkMachineSecret; readOnly = true; };
     mkUserSecret = mkOption { type = types.raw; default = libImpl.mkUserSecret; readOnly = true; };
 
+    # R3.2 rotation watchers: codify the two proven shapes (vaultwarden
+    # restart vs wireguard try-restart). Each returns { paths, services }
+    # fragments to merge into the consumer module. restart = always run
+    # fresh (secret read at startup only); try-restart = re-apply to active
+    # units, leave manually-down units down. No third mechanism.
+    mkRestartOnRotation = mkOption {
+      type = types.raw;
+      readOnly = true;
+      description = "Function { service, secretName, file }: path unit + oneshot restarter (systemctl restart <service>) watching getPath secretName file.";
+      default = { service, secretName, file }:
+        let path = getPathFun secretName file;
+        in {
+          paths."${service}-env-rotation" = {
+            description = "Restart ${service} when its secret file rotates";
+            wantedBy = [ "multi-user.target" ];
+            pathConfig = { PathChanged = [ path ]; Unit = "${service}-env-rotation-restart.service"; };
+          };
+          services."${service}-env-rotation-restart" = {
+            description = "Restart ${service} after secret rotation";
+            serviceConfig = {
+              Type = "oneshot";
+              ExecStart = "${pkgs.systemd}/bin/systemctl restart ${service}.service";
+            };
+          };
+        };
+    };
+    mkTryRestartOnRotation = mkOption {
+      type = types.raw;
+      readOnly = true;
+      description = "Function { service, secretName, file }: path unit + oneshot restarter (systemctl try-restart <service>) watching getPath secretName file.";
+      default = { service, secretName, file }:
+        let path = getPathFun secretName file;
+        in {
+          paths."${service}-env-rotation" = {
+            description = "Re-apply ${service} when its secret file rotates";
+            wantedBy = [ "multi-user.target" ];
+            pathConfig = { PathChanged = [ path ]; Unit = "${service}-env-rotation-restart.service"; };
+          };
+          services."${service}-env-rotation-restart" = {
+            description = "Try-restart ${service} after secret rotation";
+            serviceConfig = {
+              Type = "oneshot";
+              ExecStart = "${pkgs.systemd}/bin/systemctl try-restart ${service}.service";
+            };
+          };
+        };
+    };
+
     # Helpers for reading runtime paths from Nix configurations.
     # NOTE: getPath returns null on miss (unknown generator/file, e.g. after
     # a tag typo or a missing includeTags entry). Null propagates into

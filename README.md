@@ -17,6 +17,7 @@ This repository provides a reusable Flake Parts/NixOS module exposing a small he
 - **Prompt types**: per-file `promptType = "hidden" | "multiline-hidden"`
 - **Non-secret values**: convenient accessors for files with `secret = false`
 - **ACL helpers**: per-file `additionalReaders` or manual `allowReadAccess`
+- **Rotation watchers**: `my.secrets.mkRestartOnRotation` / `mkTryRestartOnRotation` codify the two proven rotation shapes (restart vs try-restart)
 
 ---
 
@@ -186,7 +187,8 @@ Common arguments for all three constructors:
 - **prompts** (attrs, default auto-generated)
   - Clan-core flat format: `prompts.<file> = { description, type, persist }` (no `input` wrapper)
   - Auto: `prompts.<file> = { description = "${name} (${file})"; type = promptType; persist = false; }`
-  - Provide a subset to override
+  - Provide a subset to override (deep-merged per file: overriding one key inherits the auto `type`/`persist`)
+- **requiredPrompts** (list of strings, default `[]`): fail the generator loudly (`exit 1`) when any `$prompts/<file>` is missing or empty — use instead of silent prompt-less fallbacks (never ship shared-constant fallback secrets)
 - **script** (bash string, required): writes outputs into `$out/<file>`
 - **runtimeInputs** (list of pkgs, default `[ ]` plus `jq`)
 - **dependencies** (list of derivations, default `[ ]`)
@@ -201,7 +203,7 @@ Behavior injected by constructors:
 - Adds a read-only file `manifest.json` to the generator outputs with `secret = false`, `mode = "0400"`
 - Wraps your `script` to emit `manifest.json` containing derivation metadata and resolved runtime paths
 - Adds `jq` to `PATH` for manifest processing
-- Captures per-file `additionalReaders` into internal metadata for the ACL subsystem
+- Captures per-file `additionalReaders` into internal metadata for the ACL subsystem (reserved `validation._acl_additionalReaders` key — never set it yourself)
 
 ### Module options
 
@@ -228,12 +230,14 @@ Behavior injected by constructors:
   - `my.secrets.paths.<gen>.<file>.path`
   - `my.secrets.pathsFlat."<gen>.<file>".path`
   - `my.secrets.getPath "<gen>" "<file>" -> path | null` (null on miss — prefer `getPathStrict`, which throws at eval with available-names hint)
+  - `my.secrets.mkRestartOnRotation { service, secretName, file }` / `my.secrets.mkTryRestartOnRotation { ... }` (read-only fns returning `{ paths, services }` fragments to merge into your module config)
 - **Value helpers (read-only; only for `secret = false`)**
   - `my.secrets.values.<gen>.<file>.value`
   - `my.secrets.valuesFlat."<gen>.<file>".value`
   - `my.secrets.getValue "<gen>" "<file>" -> string | null` (null on miss — `getValueStrict` throws at eval instead)
 - **ACLs**
   - `my.secrets.allowReadAccess = [ { path = "/abs/path"; readers = [ "alice" "svc" ]; } ... ]`
+  - `my.secrets.revokeStaleAcls` (bool, default false): also emit `setfacl -x` revoker units for empty-`readers` entries. Opt in per machine only after auditing that all readers live in this config — a revoker for a generator whose readers are declared elsewhere would strip live ACLs.
 
 ---
 
@@ -279,6 +283,7 @@ Grant per-user read access to root-owned deployed files without duplicating secr
 
   - Trigger on content modifications and on parent directory changes, not on "exists" at boot (avoids start-limit loops)
   - Reapply ACL unconditionally; idempotent
+  - Path units coalesce storms (`TriggerLimitIntervalSec = 30s`, `TriggerLimitBurst = 10`, systemd ≥249); point manual `allowReadAccess` targets at per-service files, not busy shared dirs
 
 - **Important note about sops-nix and tmpfs**
 
@@ -322,6 +327,7 @@ Copy a user-scoped deployed secret file from `/run/secrets-for-users/vars/<name>
   - Triggers on file content modifications and on the source directory change
   - Only updates destination if content changed
   - Ensures destination directory exists with secure ownership and permissions
+  - Destinations are confined to `/home/` and `/var/lib/` (eval error otherwise); `mode` must be one of `0400`, `0440`, `0600`. Absent source fails loud (`exit 1` → `Restart=on-failure` retries until clan deploys); start limits match the ACL units (`300s`/`60`).
 
 ---
 
@@ -353,6 +359,49 @@ config.my.secrets.getValue "example" "public"
 config.my.secrets.values.example.public.value
 config.my.secrets.valuesFlat."example.public".value
 ```
+
+### Rotation: restart vs try-restart
+
+Clan deploys secrets; systemd owns service lifecycle. `restartTriggers` on
+`/run/secrets` paths are inert strings that never fire — watch the deployed
+file with a path unit and (try-)restart the service instead. Two shapes cover
+production (no third mechanism):
+
+- **restart** (e.g. vaultwarden): the service must always run with fresh
+  secrets; a rotated file restarts it even if it was stopped.
+- **try-restart** (e.g. wireguard tunnels): rotated files re-apply to active
+  units; manually-down units stay down and read fresh files on next start
+  (handy when units are per-tunnel and some are intentionally off).
+
+```nix
+systemd.paths = (config.my.secrets.mkRestartOnRotation {
+  service = "vaultwarden";
+  secretName = "vaultwarden";
+  file = "env";
+}).paths;
+systemd.services = (config.my.secrets.mkRestartOnRotation {
+  service = "vaultwarden";
+  secretName = "vaultwarden";
+  file = "env";
+}).services;
+```
+
+### Rotation/offboarding runbook
+
+- **Rotate a secret**: update the generator (or re-run prompts), deploy;
+  the rotation watcher (or expose-user/ACL path unit) picks up the new file
+  and restarts/copies. Verify the deployed file under
+  `/run/secrets[-for-users]/vars/<name>/` changed.
+- **Offboard a reader**: remove the name from `additionalReaders` /
+  `allowReadAccess`. With `revokeStaleAcls = true` an empty-`readers` entry
+  emits a `setfacl -x` revoker; otherwise remove the ACL manually with
+  `setfacl -x <path>` on each host that granted it.
+- **Remove an exposed copy**: delete the `exposeUserSecrets` entry, deploy,
+  then delete the `dest` file on the host (no automatic cleanup — copies are
+  never removed by the helper).
+- **Shared (`share = true`) generators** are fleet-valid credentials: one
+  host's store compromise affects all consumers. Rotate on every machine
+  that discovers the generator, not just the one you touched.
 
 ---
 

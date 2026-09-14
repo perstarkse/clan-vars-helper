@@ -110,6 +110,17 @@ let
     in
       f.path or null;
 
+  availableGenNames = lib.concatStringsSep ", " (attrNames nestedPaths);
+  # Strict variants: throw at eval with a hint instead of propagating null.
+  getPathStrictFun = name: file:
+    let p = getPathFun name file;
+    in if p != null then p else
+    throw (
+      if builtins.hasAttr name nestedPaths
+      then "my.secrets.getPathStrict: unknown file \"${file}\" in generator \"${name}\"; available files: ${lib.concatStringsSep ", " (attrNames (builtins.getAttr name nestedPaths))}"
+      else "my.secrets.getPathStrict: unknown generator \"${name}\" for file \"${file}\"; available generators: ${availableGenNames}"
+    );
+
   # Expose non-secret values (if available via clan.core.vars).
   nestedValues = lib.mapAttrs
     (_: gen:
@@ -143,6 +154,10 @@ let
     in
       f.value or null;
 
+  getValueStrictFun = name: file:
+    let v = getValueFun name file;
+    in if v != null then v else throw "my.secrets.getValueStrict: no readable value for \"${name}.${file}\" (unknown generator/file, secret file, or value not populated); available generators: ${availableGenNames}";
+
 in
 {
   imports = [ ./expose-user.nix ./acl.nix ];
@@ -158,8 +173,8 @@ in
       type = types.submodule {
         options = {
           enable = mkOption { type = types.bool; default = false; };
-          dir = mkOption { type = types.path; default = defaultDiscoverDir; description = "Directory of *.nix returning lists/attrsets of generator attrsets."; };
-          includeTags = mkOption { type = types.listOf types.str; default = [ ]; description = "Only include generators whose meta.tags intersect these."; };
+          dir = mkOption { type = types.path; default = defaultDiscoverDir; description = "Directory of *.nix returning lists/attrsets of generator attrsets. Must exist when enable is true (asserted)."; };
+          includeTags = mkOption { type = types.listOf types.str; default = [ ]; description = "Only include generators whose meta.tags intersect these. Must be non-empty when enable is true (asserted; empty would silently include everything)."; };
           excludeTags = mkOption { type = types.listOf types.str; default = [ ]; description = "Exclude generators whose meta.tags intersect these."; };
         };
       };
@@ -171,15 +186,29 @@ in
     mkMachineSecret = mkOption { type = types.raw; default = libImpl.mkMachineSecret; readOnly = true; };
     mkUserSecret = mkOption { type = types.raw; default = libImpl.mkUserSecret; readOnly = true; };
 
-    # Helpers for reading runtime paths from Nix configurations
+    # Helpers for reading runtime paths from Nix configurations.
+    # NOTE: getPath returns null on miss (unknown generator/file, e.g. after
+    # a tag typo or a missing includeTags entry). Null propagates into
+    # environmentFile/allowReadAccess and fails late or drops the ACL silently,
+    # so prefer getPathStrict for those: it throws at eval with a hint.
     paths = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.path -> runtime path string"; };
     pathsFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".path -> runtime path string"; };
-    getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path or null"; };
+    getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path or null (null on miss; prefer getPathStrict)"; };
+
+    getPathStrict = mkOption { type = types.raw; default = getPathStrictFun; readOnly = true; description = "Function: name -> file -> runtime path; throws at eval with available-names hint on miss"; };
 
     # Helpers for accessing non-secret values (as strings) if available
     values = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.value -> string or null (only for non-secret files)"; };
     valuesFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".value -> string or null (only for non-secret files)"; };
-    getValue = mkOption { type = types.raw; default = getValueFun; readOnly = true; description = "Function: name -> file -> value (string) or null (only for non-secret files)"; };
+    getValue = mkOption { type = types.raw; default = getValueFun; readOnly = true; description = "Function: name -> file -> value (string) or null (only for non-secret files; null on miss, prefer getValueStrict)"; };
+
+    getValueStrict = mkOption { type = types.raw; default = getValueStrictFun; readOnly = true; description = "Function: name -> file -> value (string); throws at eval when no readable value exists"; };
+
+    requireGenerators = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = "Generator names that must exist in clan.core.vars.generators after merge. Missing entries fail evaluation.";
+    };
 
     generateManifest = mkOption {
       type = types.bool;
@@ -196,14 +225,35 @@ in
         then discoverFromDir discoverCfg.dir discoverCfg.includeTags discoverCfg.excludeTags
         else [ ];
       combinedDecls = config.my.secrets.declarations ++ discovered;
+      allDeclNames = concatMap attrNames combinedDecls;
+      dupNames = lib.unique (filter (n: lib.count (m: m == n) allDeclNames > 1) allDeclNames);
+      mergedGenerators = lib.foldl' (acc: decl: acc // decl) { } combinedDecls;
+      missingRequired = filter (n: !(builtins.hasAttr n gens)) config.my.secrets.requireGenerators;
     in
     {
-      clan.core.vars.generators = lib.foldl' (acc: decl: acc // decl) { } combinedDecls;
+      clan.core.vars.generators =
+        if dupNames != [ ]
+        then builtins.trace "my.secrets: duplicate generator name(s), last declaration wins: ${lib.concatStringsSep ", " dupNames}" mergedGenerators
+        else mergedGenerators;
       my.secrets = {
         paths = nestedPaths;
         pathsFlat = flatPaths;
         values = nestedValues;
         valuesFlat = flatValues;
       };
+      assertions = [
+        {
+          assertion = missingRequired == [ ];
+          message = "my.secrets.requireGenerators: missing generator(s): ${lib.concatStringsSep ", " missingRequired}; available: ${lib.concatStringsSep ", " (attrNames gens)}";
+        }
+        {
+          assertion = (!discoverCfg.enable) || discoverCfg.includeTags != [ ];
+          message = "my.secrets.discover: enable is true with empty includeTags, which would include every generator; set includeTags explicitly.";
+        }
+        {
+          assertion = (!discoverCfg.enable) || pathExists discoverCfg.dir;
+          message = "my.secrets.discover: dir does not exist; set discover.dir explicitly.";
+        }
+      ];
     };
 }

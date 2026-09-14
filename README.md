@@ -53,9 +53,12 @@ Add this flake as an input and import the module on your host. Then define a sim
               })
             ];
 
-            # Example: wire the runtime file path into another module
+            # Example: wire the runtime file path into another module.
+            # getPath returns null on miss (typo, undiscovered generator),
+            # which fails late downstream — prefer getPathStrict for
+            # environmentFile/allowReadAccess so misses fail at eval.
             services.my-service.settings.pass_file =
-              config.my.secrets.getPath "openai-api-key" "key";
+              config.my.secrets.getPathStrict "openai-api-key" "key";
           })
         ];
       };
@@ -207,8 +210,10 @@ Behavior injected by constructors:
 - **`my.secrets.discover`** (submodule)
   - `enable` (bool, default false)
   - `dir` (path, default `./../../vars/generators` relative to this module)
-  - `includeTags` (list of strings, default `[]`)
+  - `includeTags` (list of strings, default `[]`; required non-empty when `enable` is true — empty would silently include everything)
   - `excludeTags` (list of strings, default `[]`)
+- **`my.secrets.requireGenerators`** (list of strings, default `[]`)
+  - Generator names that must exist in `clan.core.vars.generators` after merge; missing entries fail evaluation (fail closed on undiscovered generators)
 - **`my.secrets.exposeUserSecret`** (single entry; legacy)
   - Deprecated in favor of `exposeUserSecrets`
 - **`my.secrets.exposeUserSecrets`** (list of submodules)
@@ -222,11 +227,11 @@ Behavior injected by constructors:
 - **Paths helpers (read-only)**
   - `my.secrets.paths.<gen>.<file>.path`
   - `my.secrets.pathsFlat."<gen>.<file>".path`
-  - `my.secrets.getPath "<gen>" "<file>" -> path | null`
+  - `my.secrets.getPath "<gen>" "<file>" -> path | null` (null on miss — prefer `getPathStrict`, which throws at eval with available-names hint)
 - **Value helpers (read-only; only for `secret = false`)**
   - `my.secrets.values.<gen>.<file>.value`
   - `my.secrets.valuesFlat."<gen>.<file>".value`
-  - `my.secrets.getValue "<gen>" "<file>" -> string | null`
+  - `my.secrets.getValue "<gen>" "<file>" -> string | null` (null on miss — `getValueStrict` throws at eval instead)
 - **ACLs**
   - `my.secrets.allowReadAccess = [ { path = "/abs/path"; readers = [ "alice" "svc" ]; } ... ]`
 
@@ -266,7 +271,7 @@ Grant per-user read access to root-owned deployed files without duplicating secr
 
   ```nix
   my.secrets.allowReadAccess = [
-    { path = config.my.secrets.getPath "api-key-openrouter" "api_key"; readers = [ "alice" ]; }
+    { path = config.my.secrets.getPathStrict "api-key-openrouter" "api_key"; readers = [ "alice" ]; } # strict: unknown secrets fail at eval, not as silently dropped ACLs
   ];
   ```
 
@@ -324,7 +329,7 @@ Copy a user-scoped deployed secret file from `/run/secrets-for-users/vars/<name>
 
 - Use in other module options without hardcoding paths:
   - `config.my.secrets.paths."<gen>"."<file>".path`
-  - `config.my.secrets.getPath "<gen>" "<file>"`
+  - `config.my.secrets.getPath "<gen>" "<file>"` (null on miss) or `config.my.secrets.getPathStrict "<gen>" "<file>"` (throws on miss — use for `environmentFile`/`allowReadAccess`)
 - To read non-secret values (`secret = false`) as strings:
   - `config.clan.core.vars.generators.<gen>.files.<file>.value` (canonical per Clan)
   - `config.my.secrets.values.<gen>.<file>.value` (convenience)

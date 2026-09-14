@@ -190,7 +190,8 @@ Common arguments for all three constructors:
   - Provide a subset to override (deep-merged per file: overriding one key inherits the auto `type`/`persist`)
 - **requiredPrompts** (list of strings, default `[]`): fail the generator loudly (`exit 1`) when any `$prompts/<file>` is missing or empty — use instead of silent prompt-less fallbacks (never ship shared-constant fallback secrets)
 - **script** (bash string, required): writes outputs into `$out/<file>`
-- **runtimeInputs** (list of pkgs, default `[ ]` plus `jq`)
+- **runtimeInputs** (list of pkgs, default `[ ]` plus `jq` when `generateManifest` is true)
+- **manifestVerbosity** (`"minimal"` | `"full"`, default `"minimal"`; also `my.secrets.manifestVerbosity`): minimal manifests carry name + file list; full adds `meta`/`validation`/`store`
 - **dependencies** (list of derivations, default `[ ]`)
 - **validation** (attrs, default `{ }`)
 - **meta** (attrs, default `{ }`)
@@ -288,7 +289,8 @@ Grant per-user read access to root-owned deployed files without duplicating secr
 - **Important note about sops-nix and tmpfs**
 
   - When any ACL target is under `/run/secrets-for-users`, this module enables `sops.useTmpfs = true` by default (if `sops-nix` is present), switching its storage to tmpfs so ACLs work
-  - tmpfs can swap to disk; review swap configuration and consider enabling swap encryption
+  - tmpfs can swap to disk; review swap configuration and consider enabling swap encryption (a `warnings` entry was avoided: it self-triggered infinite eval recursion — see `acl.nix`)
+  - Set `sops.useTmpfs` explicitly if you want to pin the choice
 
 - **Requirements**
   - Filesystem ACL support (typically enabled on ext4/xfs)
@@ -408,7 +410,8 @@ systemd.services = (config.my.secrets.mkRestartOnRotation {
 ## Manifest
 
 - Path: `/run/secrets/vars/<name>/manifest.json` or `/run/secrets-for-users/vars/<name>/manifest.json` when any file has `neededFor = "users"`
-- Contents: name, scope, share, store settings, `derivation` info (`hostname`, `generatedAt`, `dependencies`), and `files` with final deploy paths
+- Verbosity: `my.secrets.manifestVerbosity = "minimal"` (default: name + file list) or `"full"` (additionally `meta`/`validation`/`store`). Full manifests carry hostnames, store backends and reader hints with `secret = false` — keep minimal unless you need the metadata on-host.
+- Contents: name, scope, share, `derivation` info (`hostname`, `generatedAt`, `dependencies`), and `files` with final deploy paths
 
 Minimal shape (illustrative):
 

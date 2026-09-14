@@ -52,7 +52,13 @@ let
   targetsUsersRun = items: lib.any (it: lib.hasPrefix "/run/secrets-for-users/" (it.path or "")) items;
   needsUsersAcl = (targetsUsersRun aclItemsFromGenerators) || (targetsUsersRun manualAclsFiltered);
 
-  # If sops-nix is present, prefer using its tmpfs instead of mounting ourselves
+  # If sops-nix is present, prefer using its tmpfs instead of mounting ourselves.
+  # NOTE (R4.3): this flips host-wide secret storage as a side effect of a
+  # per-file ACL. tmpfs can swap to disk — enable swap encryption or set
+  # sops.useTmpfs explicitly. A `warnings` entry here would self-trigger
+  # infinite recursion (warnings force full config eval, which re-reads
+  # needsUsersAcl from clan generators), so the warning lives in the README
+  # ACL section and the allowReadAccess option description instead.
   enableSopsTmpfs = needsUsersAcl && (options ? sops && options.sops ? useTmpfs);
 
   mkUnitsForItem = prefix: item:
@@ -172,7 +178,7 @@ in
     type = types.listOf (types.submodule {
       options = {
         path = mkOption { type = types.str; description = "Absolute path to the file to grant read access for"; };
-        readers = mkOption { type = types.listOf types.str; default = [ ]; description = "Users to grant read ACL (r). Empty + revokeStaleAcls emits a setfacl -x revoker."; };
+        readers = mkOption { type = types.listOf types.str; default = [ ]; description = "Users to grant read ACL (r). Empty + revokeStaleAcls emits a setfacl -x revoker. NOTE: a target under /run/secrets-for-users auto-enables sops.useTmpfs host-wide (tmpfs may swap; enable swap encryption or set sops.useTmpfs explicitly)."; };
       };
     });
     default = [ ];

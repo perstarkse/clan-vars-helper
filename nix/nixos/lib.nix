@@ -37,6 +37,7 @@ let
     , meta ? { }
     , defaultNeededFor ? (if scope == "user" then "users" else "services")
     , requiredPrompts ? [ ] # fail the generator loudly when any of these $prompts/<file> is missing
+    , manifestVerbosity ? "minimal" # "minimal" (name + file list) or "full" (+ meta/validation/store)
     }:
     let
       # Accept extra per-file attribute `promptType` (e.g., "hidden", "multiline-hidden")
@@ -87,7 +88,7 @@ let
         then ensureManifestFile filesBase
         else filesBase;
 
-      runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
+      runtimeInputsAll = runtimeInputs ++ lib.optional (config.my.secrets.generateManifest or true) pkgs.jq;
       # R3.3: fail loudly when a required prompt is missing/empty instead of
       # falling through to silent prompt-less output (or shared-constant
       # fallbacks). Checked at generator runtime, before the user script.
@@ -108,6 +109,7 @@ let
           manifestLib.wrapScript
             {
               inherit name scope share validation meta settings dependencies requiredPrompts;
+              manifestVerbosity = config.my.secrets.manifestVerbosity or manifestVerbosity;
               # Use the richer spec so the manifest JSON can include descriptive fields
               filesSpec = filesWithDefaults;
               userScript = script;
@@ -132,8 +134,14 @@ let
         prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
-        validation = validation // {
-          # JSON-encoded map fileName -> [ readers ] to satisfy Clan scalar-leaf constraint
+        validation = { _acl_additionalReaders = builtins.toJSON additionalReadersByFile; } // validation // {
+          # JSON-encoded map fileName -> [ readers ] to satisfy Clan
+          # scalar-leaf constraint. WARNING: validation content may be
+          # persisted by Clan (git-backed public store); adding/removing a
+          # reader changes this string and may or may not rotate the
+          # secret — re-verify the file after ACL-only changes. Never set
+          # _acl_additionalReaders yourself (an assertion in module.nix
+          # rejects it); pass per-file additionalReaders instead.
           _acl_additionalReaders = builtins.toJSON additionalReadersByFile;
         };
       };

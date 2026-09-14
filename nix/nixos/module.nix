@@ -263,6 +263,12 @@ in
       default = true;
       description = "If true, add a 'manifest' file to each generator and write a machine-readable manifest alongside outputs at runtime. Set to false to disable manifests entirely.";
     };
+
+    manifestVerbosity = mkOption {
+      type = types.enum [ "minimal" "full" ];
+      default = "minimal";
+      description = "Minimal manifests carry name + file list only; full additionally embeds meta/validation/store (hostnames, backends — info-disclosure risk, and secret=false may route toward the public store).";
+    };
   };
 
   config =
@@ -277,6 +283,18 @@ in
       dupNames = lib.unique (filter (n: lib.count (m: m == n) allDeclNames > 1) allDeclNames);
       mergedGenerators = lib.foldl' (acc: decl: acc // decl) { } combinedDecls;
       missingRequired = filter (n: !(builtins.hasAttr n gens)) config.my.secrets.requireGenerators;
+      # R4.1 fallback: the sidecar key belongs to the ACL subsystem
+      # (lib.nix injects it). A consumer-supplied copy would be silently
+      # overwritten by the merge there — fail closed. Scans the raw
+      # declarations (pre-merge callers pass validation straight through).
+      reservedSidecarDecls = filter
+        (decl:
+          builtins.any
+            (n:
+              let v = builtins.getAttr n decl;
+              in isAttrs v && v ? validation && v.validation ? _acl_additionalReaders)
+            (attrNames decl))
+        combinedDecls;
     in
     {
       clan.core.vars.generators =
@@ -290,6 +308,10 @@ in
         valuesFlat = flatValues;
       };
       assertions = [
+        {
+          assertion = reservedSidecarDecls == [ ];
+          message = "my.secrets: validation._acl_additionalReaders is reserved for the ACL sidecar; pass per-file additionalReaders instead.";
+        }
         {
           assertion = missingRequired == [ ];
           message = "my.secrets.requireGenerators: missing generator(s): ${lib.concatStringsSep ", " missingRequired}; available: ${lib.concatStringsSep ", " (attrNames gens)}";

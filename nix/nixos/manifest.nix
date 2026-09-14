@@ -25,12 +25,9 @@ in
         inherit (args) scope;
         inherit (args) share;
         neededFor = args.defaultNeededFor;
-        store = {
-          secretStore = args.settings.secretStore;
-          publicStore = args.settings.publicStore;
-        };
-        meta = args.meta or { };
-        validation = args.validation or null;
+        # R4.2 minimal by default (name + file list): meta/validation/store
+        # carry hostnames, backends and reader hints — gate them behind
+        # manifestVerbosity = "full".
         derivation = {
           dependencies = args.dependencies or [ ];
           hostname = args.hostName;
@@ -42,6 +39,13 @@ in
             path = null;
           })
           filesArr;
+      } // lib.optionalAttrs ((args.manifestVerbosity or "minimal") == "full") {
+        store = {
+          secretStore = args.settings.secretStore;
+          publicStore = args.settings.publicStore;
+        };
+        meta = args.meta or { };
+        validation = args.validation or null;
       };
       manifestJSONStatic = json manifestObj;
       # R3.3 (manifest branch): same loud required-prompts gate as lib.nix.

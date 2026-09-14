@@ -303,15 +303,108 @@ let
       actual = (builtins.getAttr unit units).unitConfig.${field} or (builtins.getAttr unit units).pathConfig.${field} or null;
     in
     if actual == expected then toString actual else throw "unit ${unit} field ${field}: got ${toString actual}, want ${toString expected}";
-  revokerUnits =
-    builtins.listToAttrs
-      (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
-        (lib.mapAttrsToList lib.nameValuePair revokeSys.config.systemd.services));
+  sopsStub = { lib, ... }: {
+    options.sops.useTmpfs = lib.mkOption { type = lib.types.bool; default = false; };
+  };
+
+  sopsSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      sopsStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.allowReadAccess = [
+          { path = "/run/secrets-for-users/vars/s/token"; readers = [ "alice" ]; }
+        ];
+      }
+    ];
+  };
+
+  # Phase 4 systems: manifest verbosity + no-jq + sidecar guard
+  manifestSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      ({ config, ... }: {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.declarations = [
+          (config.my.secrets.mkSharedSecret {
+            name = "manifest-secret";
+            files.token = { };
+            script = "echo test > $out/token";
+          })
+        ];
+      })
+    ];
+  };
+
+  fullManifestSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      ({ config, ... }: {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.manifestVerbosity = "full";
+        my.secrets.declarations = [
+          (config.my.secrets.mkSharedSecret {
+            name = "manifest-secret";
+            files.token = { };
+            script = "echo test > $out/token";
+            meta = { owner = "sec"; };
+          })
+        ];
+      })
+    ];
+  };
+
+  noManifestSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      ({ config, ... }: {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.generateManifest = false;
+        my.secrets.declarations = [
+          (config.my.secrets.mkSharedSecret {
+            name = "plain-secret";
+            files.token = { };
+            script = "echo test > $out/token";
+          })
+        ];
+      })
+    ];
+  };
+
+  sidecarSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      ({ config, ... }: {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.declarations = [
+          (config.my.secrets.mkSharedSecret {
+            name = "sidecar-secret";
+            files.token = { };
+            script = "echo test > $out/token";
+            validation = { _acl_additionalReaders = "{}"; };
+          })
+        ];
+      })
+    ];
+  };
   revokedUnits =
     builtins.listToAttrs
       (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
         (lib.mapAttrsToList lib.nameValuePair revokedSys.config.systemd.services));
+  revokerUnits =
+    builtins.listToAttrs
+      (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
+        (lib.mapAttrsToList lib.nameValuePair revokeSys.config.systemd.services));
   strictGen = rotationSys.config.clan.core.vars.generators.rotation-secret;
+  manifestGen = manifestSys.config.clan.core.vars.generators.manifest-secret;
+  fullManifestGen = fullManifestSys.config.clan.core.vars.generators.manifest-secret;
+  noManifestGen = noManifestSys.config.clan.core.vars.generators.plain-secret;
 in
 pkgs.runCommand "nixos-eval-test" { } ''
   echo "Evaluating NixOS Module..."
@@ -352,5 +445,12 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH3 required prompts: ${if lib.hasInfix "required prompt" strictGen.script then "loud" else throw "requiredPrompts check missing from script"}"
   echo "PH3 watcher path: ${let p = rotationSys.config.systemd.paths.demo-svc-env-rotation.pathConfig; in if p.Unit == "demo-svc-env-rotation-restart.service" && p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" ] then "watches" else throw "rotation path unit miswired"}"
   echo "PH3 watcher exec: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "try-restart demo-svc.service" s.ExecStart then "try-restarts" else throw "rotation restarter miswired"}"
+  # Phase 4: minimal manifest by default, full on opt-in, no jq when disabled
+  echo "PH4 minimal: ${if lib.hasInfix "\\\"meta\\\"" manifestGen.script then throw "default manifest leaks meta" else "name+files"}"
+  echo "PH4 full: ${if lib.hasInfix "owner" fullManifestGen.script then "meta-gated" else throw "manifestVerbosity=full lost meta"}"
+  echo "PH4 full store: ${if lib.hasInfix "secretStore" fullManifestGen.script then "store-gated" else throw "manifestVerbosity=full lost store"}"
+  echo "PH4 no-jq: ${if builtins.elem pkgs.jq noManifestGen.runtimeInputs then throw "jq shipped with generateManifest=false" else "jq-free"}"
+  echo "PH4 sidecar guard: ${expectThrow "validation._acl_additionalReaders rejected" sidecarSys.config.system.build.toplevel.drvPath}"
+  echo "PH4 sops tmpfs flips: ${if sopsSys.config.sops.useTmpfs then "auto-enabled" else throw "sops.useTmpfs not auto-enabled for users-run ACL"}"
   touch $out
 ''

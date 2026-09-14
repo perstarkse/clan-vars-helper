@@ -4,15 +4,14 @@ let
 
   mkWrapper = entry:
     let
-      inherit (entry) name command envVar secretPath environmentFile;
-      title = if (entry.title or "") != "" then entry.title else name;
+      inherit (entry) name command envVar secretPath environmentFile useSystemdRun setTerminalTitle title;
+      titleStr = if title != "" then title else name;
       environmentCredentialName = "${name}-environment";
-      terminalTitleSnippet = if entry.setTerminalTitle then "printf '\\033]0;%s\\007' '${title}' || true" else "";
-      useSystemdRun = entry.useSystemdRun;
-      titleArg = lib.escapeShellArg title;
+      terminalTitleSnippet = if setTerminalTitle then "printf '\\033]0;%s\\007' '${titleStr}' || true" else "";
+      titleArg = lib.escapeShellArg titleStr;
       commandArg = lib.escapeShellArg command;
       unitArg = lib.escapeShellArg name;
-      descriptionArg = lib.escapeShellArg "Description=${title}";
+      descriptionArg = lib.escapeShellArg "Description=${titleStr}";
       credentialFlagList = lib.filter (flag: flag != null) [
         (if envVar != null && secretPath != null then "LoadCredential=${envVar}:${secretPath}" else null)
         (if environmentFile != null then "LoadCredential=${environmentCredentialName}:${environmentFile}" else null)

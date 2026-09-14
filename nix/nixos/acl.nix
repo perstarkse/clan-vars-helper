@@ -67,8 +67,12 @@ let
         pathConfig = {
           # Trigger when the file content changes
           PathModified = item.path;
-          # Trigger when the containing directory changes (creation, rename)
+          # Trigger when the containing directory changes (creation, rename).
+          # Point manual targets at per-service files, not busy shared dirs:
+          # every sibling change re-runs setfacl (coalesced below).
           PathChanged = builtins.dirOf item.path;
+          TriggerLimitIntervalSec = "30s";
+          TriggerLimitBurst = 10;
         };
       };
       services."${unitBase}" = {

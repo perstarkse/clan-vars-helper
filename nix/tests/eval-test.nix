@@ -142,6 +142,79 @@ let
     ];
   };
 
+  advUser = "a';id;#";
+
+  phase2Sys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.exposeUserSecrets = [
+          {
+            enable = true;
+            secretName = "user-ssh-key";
+            file = "key";
+            user = "alice";
+          }
+          {
+            enable = true;
+            secretName = "weird-secret";
+            file = "key";
+            user = advUser;
+            dest = "/home/victim/injected";
+          }
+          {
+            enable = true;
+            secretName = "svc-secret";
+            file = "env";
+            user = "svc";
+            dest = "/var/lib/svc/secret.env";
+          }
+        ];
+      }
+    ];
+  };
+
+  badModeSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.exposeUserSecrets = [
+          { enable = true; secretName = "s"; file = "f"; user = "u"; mode = "0644"; }
+        ];
+      }
+    ];
+  };
+
+  relDestSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.exposeUserSecrets = [
+          { enable = true; secretName = "s"; file = "f"; user = "u"; dest = "relative/path"; }
+        ];
+      }
+    ];
+  };
+
+  outsideDestSys = lib.nixosSystem {
+    modules = [
+      self.nixosModules.default
+      clanStub
+      {
+        nixpkgs.hostPlatform = "x86_64-linux";
+        my.secrets.exposeUserSecrets = [
+          { enable = true; secretName = "s"; file = "f"; user = "u"; dest = "/etc/evil"; }
+        ];
+      }
+    ];
+  };
+
   gens = nixosSystem.config.clan.core.vars.generators;
   discoverGens = discoverSys.config.clan.core.vars.generators;
   getPath = nixosSystem.config.my.secrets.getPath;
@@ -163,6 +236,18 @@ let
     if set ? ${name} then "present" else throw "${name} missing from clan.core.vars.generators";
   expectAbsent = set: name:
     if set ? ${name} then throw "${name} should not be in clan.core.vars.generators" else "absent";
+  # Phase 2 units: filter to our units (the test system has ~50 stock ones).
+  exposeSvcs = phase2Sys.config.systemd.services;
+  exposePaths = phase2Sys.config.systemd.paths;
+  ourSvcNames = builtins.filter (n: lib.hasPrefix "my-expose-user-secret-" n) (builtins.attrNames exposeSvcs);
+  ourPathNames = builtins.filter (n: lib.hasPrefix "my-expose-user-secret-" n) (builtins.attrNames exposePaths);
+  advName = builtins.head (builtins.filter (n: lib.hasInfix "weird-secret" n) ourSvcNames);
+  advScript = (builtins.getAttr advName exposeSvcs).script;
+  expectUnitField = units: unit: field: expected:
+    let
+      actual = (builtins.getAttr unit units).unitConfig.${field} or (builtins.getAttr unit units).pathConfig.${field} or null;
+    in
+    if actual == expected then toString actual else throw "unit ${unit} field ${field}: got ${toString actual}, want ${toString expected}";
 in
 pkgs.runCommand "nixos-eval-test" { } ''
   echo "Evaluating NixOS Module..."
@@ -186,5 +271,15 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH1 requireGenerators miss: ${expectThrow "requireGenerators ghost" reqMissingSys.config.system.build.toplevel.drvPath}"
   echo "PH1 empty includeTags: ${expectThrow "discover empty includeTags" emptyTagsSys.config.system.build.toplevel.drvPath}"
   echo "PH1 missing dir: ${expectThrow "discover missing dir" badDirSys.config.system.build.toplevel.drvPath}"
+  # Phase 2: adversarial expose-user entry renders inert (quoted + sanitized)
+  echo "PH2 units: ${toString (builtins.length ourSvcNames)} services / ${toString (builtins.length ourPathNames)} paths (expect 3/3)"
+  echo "PH2 quoted user: ${if lib.hasInfix "\\'" advScript then "quoted" else throw "adversarial user not escapeShellArg-quoted"}"
+  echo "PH2 sane names: ${let bad = builtins.filter (n: builtins.match "[a-zA-Z0-9-]+" n == null) (ourSvcNames ++ ourPathNames); in if bad == [ ] then "sanitized" else throw ("raw chars in unit names: " + lib.concatStringsSep ", " bad)}"
+  echo "PH2 limits: ${expectUnitField exposeSvcs advName "StartLimitIntervalSec" 300}/${expectUnitField exposeSvcs advName "StartLimitBurst" 60}"
+  echo "PH2 loud absent source: ${if lib.hasInfix "exit 1" advScript then "retries" else throw "absent source exits 0 (silent)"}"
+  echo "PH2 trigger coalescing: ${expectUnitField exposePaths advName "TriggerLimitBurst" 10}"
+  echo "PH2 bad mode: ${expectThrow "mode 0644 rejected" badModeSys.config.system.build.toplevel.drvPath}"
+  echo "PH2 relative dest: ${expectThrow "relative dest rejected" relDestSys.config.system.build.toplevel.drvPath}"
+  echo "PH2 outside dest: ${expectThrow "/etc/evil rejected" outsideDestSys.config.system.build.toplevel.drvPath}"
   touch $out
 ''

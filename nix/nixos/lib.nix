@@ -88,7 +88,14 @@ let
         then ensureManifestFile filesBase
         else filesBase;
 
-      runtimeInputsAll = runtimeInputs ++ lib.optional (config.my.secrets.generateManifest or true) pkgs.jq;
+      # Rotation-safe: jq stays in every generator closure, even with
+      # generateManifest=false. Clan re-runs the generator script on any
+      # input change (prompts, files, validation incl. the ACL sidecar);
+      # dropping jq only from the no-manifest branch would change the
+      # closure — and risk re-generation, i.e. accidental rotation — for
+      # every fleet generator on the next deploy after the input bump.
+      # The cost (one extra store path) is not worth that risk.
+      runtimeInputsAll = runtimeInputs ++ [ pkgs.jq ];
       # R3.3: fail loudly when a required prompt is missing/empty instead of
       # falling through to silent prompt-less output (or shared-constant
       # fallbacks). Checked at generator runtime, before the user script.

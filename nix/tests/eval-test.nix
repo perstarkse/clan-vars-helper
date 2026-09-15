@@ -273,12 +273,11 @@ let
   gens = nixosSystem.config.clan.core.vars.generators;
   discoverGens = discoverSys.config.clan.core.vars.generators;
   getPath = nixosSystem.config.my.secrets.getPath;
+  getValue = phase1Sys.config.my.secrets.getValue;
   phase1Gens = phase1Sys.config.clan.core.vars.generators;
-  strictGetPath = phase1Sys.config.my.secrets.getPathStrict;
-  strictGetValue = phase1Sys.config.my.secrets.getValueStrict;
   expectPathStrict = gen: file: expected:
-    let actual = strictGetPath gen file;
-    in if actual == expected then actual else throw ("getPathStrict mismatch for " + gen + "/" + file + ": got " + (toString actual) + ", want " + expected);
+    let actual = phase1Sys.config.my.secrets.getPath gen file;
+    in if actual == expected then actual else throw ("getPath mismatch for " + gen + "/" + file + ": got " + (toString actual) + ", want " + expected);
   expectThrow = label: v:
     if (builtins.tryEval v).success
     then throw label + ": expected an evaluation failure, but it succeeded"
@@ -435,9 +434,9 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "meta stripped (gen-top): ${expectAbsent discoverGens.gen-top "meta"}"
   echo "meta stripped (gen-inner): ${expectAbsent discoverGens.gen-inner "meta"}"
   echo "PH1 strict valid: ${expectPathStrict "strict-secret" "key" "/run/secrets-for-users/vars/strict-secret/key"}"
-  echo "PH1 strict miss generator: ${expectThrow "getPathStrict unknown generator" (strictGetPath "no-such-gen" "key")}"
-  echo "PH1 strict miss file: ${expectThrow "getPathStrict unknown file" (strictGetPath "strict-secret" "no-such-file")}"
-  echo "PH1 strict value miss: ${expectThrow "getValueStrict unknown" (strictGetValue "no-such-gen" "key")}"
+  echo "PH1 miss generator: ${expectThrow "getPath unknown generator" (phase1Sys.config.my.secrets.getPath "no-such-gen" "key")}"
+  echo "PH1 miss file: ${expectThrow "getPath unknown file" (phase1Sys.config.my.secrets.getPath "strict-secret" "no-such-file")}"
+  echo "PH1 value miss: ${expectThrow "getValue unknown" (getValue "no-such-gen" "key")}"
   echo "PH1 dup last-wins: ${if phase1Gens.dup.files ? b && !(phase1Gens.dup.files ? a) then "last-wins" else throw ("dup merge: expected only file b, files are " + lib.concatStringsSep "," (builtins.attrNames phase1Gens.dup.files))}"
   echo "PH1 requireGenerators miss: ${expectThrow "requireGenerators ghost" reqMissingSys.config.system.build.toplevel.drvPath}"
   echo "PH1 empty includeTags: ${expectThrow "discover empty includeTags" emptyTagsSys.config.system.build.toplevel.drvPath}"
@@ -463,7 +462,11 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH4 minimal: ${if lib.hasInfix "\\\"meta\\\"" manifestGen.script then throw "default manifest leaks meta" else "name+files"}"
   echo "PH4 full: ${if lib.hasInfix "owner" fullManifestGen.script then "meta-gated" else throw "manifestVerbosity=full lost meta"}"
   echo "PH4 full store: ${if lib.hasInfix "secretStore" fullManifestGen.script then "store-gated" else throw "manifestVerbosity=full lost store"}"
-  echo "PH4 no-jq: ${if builtins.elem pkgs.jq noManifestGen.runtimeInputs then throw "jq shipped with generateManifest=false" else "jq-free"}"
+  echo "PH4 no-jq: ${
+    # Rotation-safe by design: jq stays in every generator closure so a
+    # manifest toggle never changes generator inputs (which risks
+    # re-generation). Assert presence instead of absence.
+    if builtins.elem pkgs.jq noManifestGen.runtimeInputs then "jq-kept" else throw "jq missing with generateManifest=false (closure changed!)"}"
   echo "PH4 sidecar guard: ${expectThrow "validation._acl_additionalReaders rejected" sidecarSys.config.system.build.toplevel.drvPath}"
   echo "PH4 sops tmpfs flips: ${if sopsSys.config.sops.useTmpfs then "auto-enabled" else throw "sops.useTmpfs not auto-enabled for users-run ACL"}"
   # Phase 5: malformed declaration (function, not attrset) fails closed

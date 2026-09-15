@@ -103,23 +103,23 @@ let
       )
       (attrNames gens)
   );
+  # Fail-closed lookups: unknown generator/file throws at eval with a hint
+  # instead of propagating null (null broke string interpolation late or
+  # silently dropped ACLs). No lenient variant is kept.
   getPathFun = name: file:
     let
       n = if builtins.hasAttr name nestedPaths then builtins.getAttr name nestedPaths else { };
       f = if builtins.hasAttr file n then builtins.getAttr file n else { };
+      p = f.path or null;
     in
-      f.path or null;
-
-  availableGenNames = lib.concatStringsSep ", " (attrNames nestedPaths);
-  # Strict variants: throw at eval with a hint instead of propagating null.
-  getPathStrictFun = name: file:
-    let p = getPathFun name file;
-    in if p != null then p else
+    if p != null then p else
     throw (
       if builtins.hasAttr name nestedPaths
-      then "my.secrets.getPathStrict: unknown file \"${file}\" in generator \"${name}\"; available files: ${lib.concatStringsSep ", " (attrNames (builtins.getAttr name nestedPaths))}"
-      else "my.secrets.getPathStrict: unknown generator \"${name}\" for file \"${file}\"; available generators: ${availableGenNames}"
+      then "my.secrets.getPath: unknown file \"${file}\" in generator \"${name}\"; available files: ${lib.concatStringsSep ", " (attrNames (builtins.getAttr name nestedPaths))}"
+      else "my.secrets.getPath: unknown generator \"${name}\" for file \"${file}\"; available generators: ${availableGenNames}"
     );
+
+  availableGenNames = lib.concatStringsSep ", " (attrNames nestedPaths);
 
   # Expose non-secret values (if available via clan.core.vars).
   nestedValues = lib.mapAttrs
@@ -151,12 +151,9 @@ let
     let
       n = if builtins.hasAttr name nestedValues then builtins.getAttr name nestedValues else { };
       f = if builtins.hasAttr file n then builtins.getAttr file n else { };
+      v = f.value or null;
     in
-      f.value or null;
-
-  getValueStrictFun = name: file:
-    let v = getValueFun name file;
-    in if v != null then v else throw "my.secrets.getValueStrict: no readable value for \"${name}.${file}\" (unknown generator/file, secret file, or value not populated); available generators: ${availableGenNames}";
+    if v != null then v else throw "my.secrets.getValue: no readable value for \"${name}.${file}\" (unknown generator/file, secret file, or value not populated); available generators: ${availableGenNames}";
 
 in
 {
@@ -235,22 +232,20 @@ in
     };
 
     # Helpers for reading runtime paths from Nix configurations.
-    # NOTE: getPath returns null on miss (unknown generator/file, e.g. after
-    # a tag typo or a missing includeTags entry). Null propagates into
-    # environmentFile/allowReadAccess and fails late or drops the ACL silently,
-    # so prefer getPathStrict for those: it throws at eval with a hint.
+    # getPath throws at eval on miss (unknown generator/file, e.g. after a
+    # tag typo or a missing includeTags entry) with an available-names hint.
+    # There is intentionally no lenient (null-returning) variant: null broke
+    # string interpolation late or silently dropped ACLs.
     paths = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.path -> runtime path string"; };
     pathsFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".path -> runtime path string"; };
-    getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path or null (null on miss; prefer getPathStrict)"; };
+    getPath = mkOption { type = types.raw; default = getPathFun; readOnly = true; description = "Function: name -> file -> runtime path; throws at eval with available-names hint on miss"; };
 
-    getPathStrict = mkOption { type = types.raw; default = getPathStrictFun; readOnly = true; description = "Function: name -> file -> runtime path; throws at eval with available-names hint on miss"; };
-
-    # Helpers for accessing non-secret values (as strings) if available
+    # Helpers for accessing non-secret values (as strings) if available.
+    # getValue throws at eval when no readable value exists (same
+    # fail-closed rule as getPath; no lenient variant is kept).
     values = mkOption { type = types.raw; readOnly = true; description = "Nested attrset: <gen>.<file>.value -> string or null (only for non-secret files)"; };
     valuesFlat = mkOption { type = types.raw; readOnly = true; description = "Flat attrset: \"<gen>.<file>\".value -> string or null (only for non-secret files)"; };
-    getValue = mkOption { type = types.raw; default = getValueFun; readOnly = true; description = "Function: name -> file -> value (string) or null (only for non-secret files; null on miss, prefer getValueStrict)"; };
-
-    getValueStrict = mkOption { type = types.raw; default = getValueStrictFun; readOnly = true; description = "Function: name -> file -> value (string); throws at eval when no readable value exists"; };
+    getValue = mkOption { type = types.raw; default = getValueFun; readOnly = true; description = "Function: name -> file -> value (string); throws at eval when no readable value exists"; };
 
     requireGenerators = mkOption {
       type = types.listOf types.str;

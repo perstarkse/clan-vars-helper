@@ -56,11 +56,10 @@ Add this flake as an input and import the module on your host. Then define a sim
             ];
 
             # Example: wire the runtime file path into another module.
-            # getPath returns null on miss (typo, undiscovered generator),
-            # which fails late downstream — prefer getPathStrict for
-            # environmentFile/allowReadAccess so misses fail at eval.
+            # getPath throws at eval on miss (typo, undiscovered
+            # generator) with an available-names hint.
             services.my-service.settings.pass_file =
-              config.my.secrets.getPathStrict "openai-api-key" "key";
+              config.my.secrets.getPath "openai-api-key" "key";
           })
         ];
       };
@@ -191,7 +190,7 @@ Common arguments for all three constructors:
   - Provide a subset to override (deep-merged per file: overriding one key inherits the auto `type`/`persist`)
 - **requiredPrompts** (list of strings, default `[]`): fail the generator loudly (`exit 1`) when any `$prompts/<file>` is missing or empty — use instead of silent prompt-less fallbacks (never ship shared-constant fallback secrets)
 - **script** (bash string, required): writes outputs into `$out/<file>`
-- **runtimeInputs** (list of pkgs, default `[ ]` plus `jq` when `generateManifest` is true)
+- **runtimeInputs** (list of pkgs, default `[ ]` plus `jq` — kept in every closure even with `generateManifest = false`, so toggling manifests never changes generator inputs and risks re-generation)
 - **manifestVerbosity** (`"minimal"` | `"full"`, default `"minimal"`; also `my.secrets.manifestVerbosity`): minimal manifests carry name + file list; full adds `meta`/`validation`/`store`
 - **dependencies** (list of derivations, default `[ ]`)
 - **validation** (attrs, default `{ }`)
@@ -231,12 +230,12 @@ Behavior injected by constructors:
 - **Paths helpers (read-only)**
   - `my.secrets.paths.<gen>.<file>.path`
   - `my.secrets.pathsFlat."<gen>.<file>".path`
-  - `my.secrets.getPath "<gen>" "<file>" -> path | null` (null on miss — prefer `getPathStrict`, which throws at eval with available-names hint)
+  - `my.secrets.getPath "<gen>" "<file>" -> path` (throws at eval with available-names hint on miss — no lenient variant)
   - `my.secrets.mkRestartOnRotation { service, secretName, file }` / `my.secrets.mkTryRestartOnRotation { ... }` (read-only fns returning `{ paths, services }` fragments to merge into your module config)
 - **Value helpers (read-only; only for `secret = false`)**
   - `my.secrets.values.<gen>.<file>.value`
   - `my.secrets.valuesFlat."<gen>.<file>".value`
-  - `my.secrets.getValue "<gen>" "<file>" -> string | null` (null on miss — `getValueStrict` throws at eval instead)
+  - `my.secrets.getValue "<gen>" "<file>" -> string` (throws at eval when no readable value exists — no lenient variant)
 - **ACLs**
   - `my.secrets.allowReadAccess = [ { path = "/abs/path"; readers = [ "alice" "svc" ]; } ... ]`
   - `my.secrets.revokeStaleAcls` (bool, default false): also emit `setfacl -x` revoker units for empty-`readers` entries. Opt in per machine only after auditing that all readers live in this config — a revoker for a generator whose readers are declared elsewhere would strip live ACLs.
@@ -277,7 +276,7 @@ Grant per-user read access to root-owned deployed files without duplicating secr
 
   ```nix
   my.secrets.allowReadAccess = [
-    { path = config.my.secrets.getPathStrict "api-key-openrouter" "api_key"; readers = [ "alice" ]; } # strict: unknown secrets fail at eval, not as silently dropped ACLs
+    { path = config.my.secrets.getPath "api-key-openrouter" "api_key"; readers = [ "alice" ]; } # unknown secrets fail at eval, not as silently dropped ACLs
   ];
   ```
 
@@ -338,7 +337,7 @@ Copy a user-scoped deployed secret file from `/run/secrets-for-users/vars/<name>
 
 - Use in other module options without hardcoding paths:
   - `config.my.secrets.paths."<gen>"."<file>".path`
-  - `config.my.secrets.getPath "<gen>" "<file>"` (null on miss) or `config.my.secrets.getPathStrict "<gen>" "<file>"` (throws on miss — use for `environmentFile`/`allowReadAccess`)
+  - `config.my.secrets.getPath "<gen>" "<file>"` (throws on miss — safe for `environmentFile`/`allowReadAccess`)
 - To read non-secret values (`secret = false`) as strings:
   - `config.clan.core.vars.generators.<gen>.files.<file>.value` (canonical per Clan)
   - `config.my.secrets.values.<gen>.<file>.value` (convenience)

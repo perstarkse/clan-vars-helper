@@ -141,14 +141,15 @@ let
         prompts = promptsFinal;
         runtimeInputs = runtimeInputsAll;
         script = wrappedScript;
-        validation = { _acl_additionalReaders = builtins.toJSON additionalReadersByFile; } // validation // {
+        validation = validation // {
           # JSON-encoded map fileName -> [ readers ] to satisfy Clan
           # scalar-leaf constraint. WARNING: validation content may be
           # persisted by Clan (git-backed public store); adding/removing a
           # reader changes this string and may or may not rotate the
           # secret — re-verify the file after ACL-only changes. Never set
           # _acl_additionalReaders yourself (an assertion in module.nix
-          # rejects it); pass per-file additionalReaders instead.
+          # rejects hand-written copies); pass per-file additionalReaders
+          # instead.
           _acl_additionalReaders = builtins.toJSON additionalReadersByFile;
         };
       };

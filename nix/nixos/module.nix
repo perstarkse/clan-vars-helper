@@ -286,17 +286,27 @@ in
         (decl: !(isAttrs decl) || builtins.any (n: !(isAttrs (builtins.getAttr n decl))) (attrNames decl))
         combinedDecls;
       # R4.1 fallback: the sidecar key belongs to the ACL subsystem
-      # (lib.nix injects it). A consumer-supplied copy would be silently
-      # overwritten by the merge there — fail closed. Scans the raw
-      # declarations (pre-merge callers pass validation straight through).
-      reservedSidecarDecls = filter
-        (decl:
-          builtins.any
-            (n:
-              let v = builtins.getAttr n decl;
-              in isAttrs v && v ? validation && v.validation ? _acl_additionalReaders)
-            (attrNames decl))
-        combinedDecls;
+      # (lib.nix injects it). A hand-written copy would be silently
+      # overwritten by the merge there — fail closed. Only scan
+      # my.secrets.declarations entries that are NOT mkBase output:
+      # mkBase output always carries files/script/prompts/share/files +
+      # runtimeInputs and legitimately holds the key (that is how acl.nix
+      # reads readers back); raw hand-written decls lack the full set.
+      # Discovered decls are NOT scanned here: discovery files are raw
+      # generator specs, and flagging them would false-positive on... no —
+      # discovered files never pass through mkBase, so any sidecar key in
+      # a discovered file IS user-supplied. Scan discovered too.
+      isWrappedOutput = v:
+        isAttrs v && v ? files && v ? script && v ? prompts && v ? share && v ? runtimeInputs;
+      hasSmuggledSidecar = decl:
+        builtins.any
+          (n:
+            let v = builtins.getAttr n decl;
+            in isAttrs v && !(isWrappedOutput v) && v ? validation && v.validation ? _acl_additionalReaders)
+          (attrNames decl);
+      reservedSidecarDecls =
+        filter hasSmuggledSidecar config.my.secrets.declarations
+        ++ filter hasSmuggledSidecar discovered;
     in
     {
       clan.core.vars.generators =

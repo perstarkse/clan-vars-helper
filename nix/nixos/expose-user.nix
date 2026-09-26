@@ -1,4 +1,4 @@
-{ lib, config, ... }:
+{ lib, config, pkgs, ... }:
 let
   inherit (lib) mkIf mkOption types listToAttrs filter map;
   cfgSingle = config.my.secrets.exposeUserSecret or null;
@@ -40,6 +40,31 @@ let
   invalidDest = filter (es: !(destAllowed (es.dest or ""))) declaredEntries;
   describeEntry = es: "${es.user}/${es.secretName}/${es.file} (dest: ${es.dest or ""}, mode: ${es.mode or "0400"})";
 
+  # Shared entry options (list + deprecated single share the schema so
+  # removeOnDisable behaves identically on both).
+  exposeEntryOptions = {
+    enable = mkOption { type = types.bool; default = false; description = "Enable exposing this secret to a user"; };
+    secretName = mkOption { type = types.str; description = "vars generator name, e.g., openai-api-key"; };
+    file = mkOption { type = types.str; description = "File inside the generator output, e.g., key"; };
+    user = mkOption { type = types.str; description = "Target user"; };
+    dest = mkOption {
+      type = types.str;
+      default = "";
+      description = "Destination path. Default: /var/lib/user-secrets/<user>/<secretName>/<file>";
+    };
+    mode = mkOption { type = types.str; default = "0400"; };
+    group = mkOption {
+      type = types.str;
+      default = "";
+      description = "Group owner for files. Default: primary group of the user";
+    };
+    removeOnDisable = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Delete dest via ExecStop when the unit stops (entry removed/disabled). Only opt in when this entry alone owns dest.";
+    };
+  };
+
   mkPathUnit = es:
     let
       srcFile = runtimePath es.secretName es.file "users";
@@ -69,6 +94,13 @@ let
       destArg = lib.escapeShellArg destPath;
       destDirArg = lib.escapeShellArg (builtins.dirOf destPath);
       modeArg = lib.escapeShellArg (es.mode or "0400");
+      # removeOnDisable: ExecStop deletes the copy when the unit is
+      # stopped (entry removed/disabled, then deploy). Off by default:
+      # deleting a dest another config still manages would strand it
+      # until the next trigger — opt in per entry after auditing that
+      # the dest is owned by this entry alone. Quoted like the rest;
+      # `rm -f` on an absolute allowlisted path only.
+      doRemove = es.removeOnDisable or false;
     in
     {
       description = "Expose secret ${es.secretName}/${es.file} to user ${es.user}";
@@ -81,8 +113,11 @@ let
       };
       serviceConfig = {
         Type = "oneshot";
+        RemainAfterExit = doRemove;
         Restart = "on-failure";
         RestartSec = 1;
+      } // lib.optionalAttrs doRemove {
+        ExecStop = "${pkgs.coreutils}/bin/rm -f ${destArg}";
       };
       script = ''
         set -euo pipefail
@@ -110,49 +145,13 @@ let
 in
 {
   options.my.secrets.exposeUserSecret = mkOption {
-    type = types.nullOr (types.submodule {
-      options = {
-        enable = mkOption { type = types.bool; default = false; description = "Enable exposing a secret to a user"; };
-        secretName = mkOption { type = types.str; description = "vars generator name, e.g., openai-api-key"; };
-        file = mkOption { type = types.str; description = "File inside the generator output, e.g., key"; };
-        user = mkOption { type = types.str; description = "Target user"; };
-        dest = mkOption {
-          type = types.str;
-          default = "";
-          description = "Destination path. Default: /var/lib/user-secrets/<user>/<secretName>/<file>";
-        };
-        mode = mkOption { type = types.str; default = "0400"; };
-        group = mkOption {
-          type = types.str;
-          default = "";
-          description = "Group owner for files. Default: primary group of the user";
-        };
-      };
-    });
+    type = types.nullOr (types.submodule { options = exposeEntryOptions; });
     default = null;
     description = "Deprecated single-entry helper; prefer my.secrets.exposeUserSecrets.";
   };
 
   options.my.secrets.exposeUserSecrets = mkOption {
-    type = types.listOf (types.submodule {
-      options = {
-        enable = mkOption { type = types.bool; default = false; description = "Enable exposing this secret to a user"; };
-        secretName = mkOption { type = types.str; description = "vars generator name, e.g., openai-api-key"; };
-        file = mkOption { type = types.str; description = "File inside the generator output, e.g., key"; };
-        user = mkOption { type = types.str; description = "Target user"; };
-        dest = mkOption {
-          type = types.str;
-          default = "";
-          description = "Destination path. Default: /var/lib/user-secrets/<user>/<secretName>/<file>";
-        };
-        mode = mkOption { type = types.str; default = "0400"; };
-        group = mkOption {
-          type = types.str;
-          default = "";
-          description = "Group owner for files. Default: primary group of the user";
-        };
-      };
-    });
+    type = types.listOf (types.submodule { options = exposeEntryOptions; });
     default = [ ];
     description = "Expose multiple secrets to users (list of entries).";
   };

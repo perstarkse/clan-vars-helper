@@ -171,6 +171,14 @@ let
             user = "svc";
             dest = "/var/lib/svc/secret.env";
           }
+          {
+            enable = true;
+            secretName = "gone-secret";
+            file = "key";
+            user = "gone";
+            dest = "/var/lib/gone/secret.key";
+            removeOnDisable = true;
+          }
         ];
       }
     ];
@@ -252,7 +260,8 @@ let
           (config.my.secrets.mkSharedSecret {
             name = "rotation-secret";
             files.env = { };
-            script = "echo test > $out/env";
+            files.token = { };
+            script = "echo test > $out/env; echo test > $out/token";
             requiredPrompts = [ "env" ];
           })
         ];
@@ -415,6 +424,32 @@ let
       (builtins.filter (u: lib.hasPrefix "my-secrets-acl-revoke-" u.name)
         (lib.mapAttrsToList lib.nameValuePair revokeSys.config.systemd.services));
   strictGen = rotationSys.config.clan.core.vars.generators.rotation-secret;
+  multiWatcher = rotationSys.config.my.secrets.mkRestartOnRotation {
+    service = "multi-svc";
+    secretName = "rotation-secret";
+    files = [ "env" "token" ];
+    settleSeconds = 5;
+  };
+  # tryEval only forces WHNF: deepSeq .paths so the lazy fileList/settle
+  # validation throws are actually triggered.
+  forcePaths = w: builtins.deepSeq w.paths "forced";
+  bothSpellingTry = builtins.tryEval (forcePaths (rotationSys.config.my.secrets.mkRestartOnRotation {
+    service = "bad-svc";
+    secretName = "rotation-secret";
+    file = "env";
+    files = [ "env" ];
+  }));
+  emptyFilesTry = builtins.tryEval (forcePaths (rotationSys.config.my.secrets.mkRestartOnRotation {
+    service = "bad-svc";
+    secretName = "rotation-secret";
+    files = [ ];
+  }));
+  badSettleTry = builtins.tryEval (forcePaths (rotationSys.config.my.secrets.mkRestartOnRotation {
+    service = "bad-svc";
+    secretName = "rotation-secret";
+    file = "env";
+    settleSeconds = -1;
+  }));
   manifestGen = manifestSys.config.clan.core.vars.generators.manifest-secret;
   fullManifestGen = fullManifestSys.config.clan.core.vars.generators.manifest-secret;
   noManifestGen = noManifestSys.config.clan.core.vars.generators.plain-secret;
@@ -442,7 +477,10 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH1 empty includeTags: ${expectThrow "discover empty includeTags" emptyTagsSys.config.system.build.toplevel.drvPath}"
   echo "PH1 missing dir: ${expectThrow "discover missing dir" badDirSys.config.system.build.toplevel.drvPath}"
   # Phase 2: adversarial expose-user entry renders inert (quoted + sanitized)
-  echo "PH2 units: ${toString (builtins.length ourSvcNames)} services / ${toString (builtins.length ourPathNames)} paths (expect 3/3)"
+  echo "PH2 units: ${toString (builtins.length ourSvcNames)} services / ${toString (builtins.length ourPathNames)} paths (expect 4/4)"
+  echo "PH2 removeOnDisable exec: ${let n = builtins.head (builtins.filter (m: lib.hasInfix "gone-secret" m) ourSvcNames); u = builtins.getAttr n exposeSvcs; e = u.serviceConfig.ExecStop or null; in if e != null && lib.hasInfix "rm -f" e && lib.hasInfix "/var/lib/gone/secret.key" e then "cleans-up" else throw "removeOnDisable unit lacks quoted rm -f dest"}"
+  echo "PH2 removeOnDisable remain: ${let n = builtins.head (builtins.filter (m: lib.hasInfix "gone-secret" m) ourSvcNames); u = builtins.getAttr n exposeSvcs; in if (u.serviceConfig.RemainAfterExit or false) then "remain" else throw "removeOnDisable unit lacks RemainAfterExit"}"
+  echo "PH2 no ExecStop by default: ${let n = builtins.head (builtins.filter (m: lib.hasInfix "user-ssh-key" m) ourSvcNames); u = builtins.getAttr n exposeSvcs; in if (u.serviceConfig.ExecStop or null) == null && !(u.serviceConfig.RemainAfterExit or false) then "off-by-default" else throw "ExecStop/RemainAfterExit leaked into a default entry"}"
   echo "PH2 quoted user: ${if lib.hasInfix "\\'" advScript then "quoted" else throw "adversarial user not escapeShellArg-quoted"}"
   echo "PH2 sane names: ${let bad = builtins.filter (n: builtins.match "[a-zA-Z0-9-]+" n == null) (ourSvcNames ++ ourPathNames); in if bad == [ ] then "sanitized" else throw ("raw chars in unit names: " + lib.concatStringsSep ", " bad)}"
   echo "PH2 limits: ${expectUnitField exposeSvcs advName "StartLimitIntervalSec" 300}/${expectUnitField exposeSvcs advName "StartLimitBurst" 60}"
@@ -458,6 +496,12 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH3 required prompts: ${if lib.hasInfix "required prompt" strictGen.script then "loud" else throw "requiredPrompts check missing from script"}"
   echo "PH3 watcher path: ${let p = rotationSys.config.systemd.paths.demo-svc-env-rotation.pathConfig; in if p.Unit == "demo-svc-env-rotation-restart.service" && p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" ] then "watches" else throw "rotation path unit miswired"}"
   echo "PH3 watcher exec: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "try-restart demo-svc.service" s.ExecStart then "try-restarts" else throw "rotation restarter miswired"}"
+  echo "PH3 multi files: ${let p = multiWatcher.paths.multi-svc-env-rotation.pathConfig; in if p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" "/run/secrets/vars/rotation-secret/token" ] then "watches-both" else throw "multi-file watcher miswired: ${toString p.PathChanged}"}"
+  echo "PH3 settle: ${let s = multiWatcher.services.multi-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "sleep 5" s.ExecStartPre && lib.hasInfix "restart multi-svc.service" s.ExecStart then "settles" else throw "settleSeconds miswired"}"
+  echo "PH3 no settle by default: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if !(s ? ExecStartPre) then "byte-identical" else throw "unexpected ExecStartPre on default watcher"}"
+  echo "PH3 file+files rejected: ${if bothSpellingTry.success then throw "file+files accepted, want failure" else "rejected"}"
+  echo "PH3 empty files rejected: ${if emptyFilesTry.success then throw "empty files accepted, want failure" else "rejected"}"
+  echo "PH3 bad settle rejected: ${if badSettleTry.success then throw "negative settle accepted, want failure" else "rejected"}"
   # Phase 4: minimal manifest by default, full on opt-in, no jq when disabled
   echo "PH4 minimal: ${if lib.hasInfix "\\\"meta\\\"" manifestGen.script then throw "default manifest leaks meta" else "name+files"}"
   echo "PH4 full: ${if lib.hasInfix "owner" fullManifestGen.script then "meta-gated" else throw "manifestVerbosity=full lost meta"}"

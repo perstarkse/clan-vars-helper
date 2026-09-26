@@ -155,6 +155,58 @@ let
     in
     if v != null then v else throw "my.secrets.getValue: no readable value for \"${name}.${file}\" (unknown generator/file, secret file, or value not populated); available generators: ${availableGenNames}";
 
+  # Shared rotation-watcher constructor: restart = always run fresh
+  # (secret read at startup only); try-restart = re-apply to active
+  # units, leave manually-down units down. No third mechanism. `file`
+  # (single) and `files` (list) are mutually exclusive spellings;
+  # `settleSeconds` adds an ExecStartPre sleep so multi-file clan write
+  # batches settle before the (single) restart fires. getPathFun throws
+  # at eval on any unknown secretName/file. Defaults (single `file`,
+  # `settleSeconds = 0`) render the pre-extension units byte-identical.
+  mkRotationWatcher = mode: { service, secretName, file ? null, files ? null, settleSeconds ? 0 }:
+    let
+      fileList =
+        if file != null && files != null then
+          throw "my.secrets.mk*OnRotation (${service}): pass exactly one of `file` or `files`, not both"
+        else if files != null then
+          (if !(isList files) then throw "my.secrets.mk*OnRotation (${service}): `files` must be a list of file names"
+          else if files == [ ] then throw "my.secrets.mk*OnRotation (${service}): `files` must be non-empty"
+          else lib.unique files)
+        else if file != null then [ file ]
+        else throw "my.secrets.mk*OnRotation (${service}): pass `file` or `files`";
+      watchedPaths = map (f: getPathFun secretName f) fileList;
+      pathDesc =
+        if mode == "restart"
+        then "Restart ${service} when its secret file rotates"
+        else "Re-apply ${service} when its secret file rotates";
+      svcDesc =
+        if mode == "restart"
+        then "Restart ${service} after secret rotation"
+        else "Try-restart ${service} after secret rotation";
+      restarter =
+        if mode == "restart" then "${pkgs.systemd}/bin/systemctl restart ${service}.service"
+        else "${pkgs.systemd}/bin/systemctl try-restart ${service}.service";
+    in
+    if !(builtins.isInt settleSeconds && settleSeconds >= 0) then
+      throw "my.secrets.mk*OnRotation (${service}): `settleSeconds` must be a non-negative integer"
+    else {
+      paths."${service}-env-rotation" = {
+        description = pathDesc;
+        wantedBy = [ "multi-user.target" ];
+        pathConfig = { PathChanged = watchedPaths; Unit = "${service}-env-rotation-restart.service"; };
+      };
+      services."${service}-env-rotation-restart" = {
+        description = svcDesc;
+        serviceConfig = {
+          Type = "oneshot";
+        } // lib.optionalAttrs (settleSeconds > 0) {
+          ExecStartPre = "${pkgs.coreutils}/bin/sleep ${toString settleSeconds}";
+        } // {
+          ExecStart = restarter;
+        };
+      };
+    };
+
 in
 {
   imports = [ ./expose-user.nix ./acl.nix ];
@@ -183,52 +235,17 @@ in
     mkMachineSecret = mkOption { type = types.raw; default = libImpl.mkMachineSecret; readOnly = true; };
     mkUserSecret = mkOption { type = types.raw; default = libImpl.mkUserSecret; readOnly = true; };
 
-    # R3.2 rotation watchers: codify the two proven shapes (vaultwarden
-    # restart vs wireguard try-restart). Each returns { paths, services }
-    # fragments to merge into the consumer module. restart = always run
-    # fresh (secret read at startup only); try-restart = re-apply to active
-    # units, leave manually-down units down. No third mechanism.
     mkRestartOnRotation = mkOption {
       type = types.raw;
       readOnly = true;
-      description = "Function { service, secretName, file }: path unit + oneshot restarter (systemctl restart <service>) watching getPath secretName file.";
-      default = { service, secretName, file }:
-        let path = getPathFun secretName file;
-        in {
-          paths."${service}-env-rotation" = {
-            description = "Restart ${service} when its secret file rotates";
-            wantedBy = [ "multi-user.target" ];
-            pathConfig = { PathChanged = [ path ]; Unit = "${service}-env-rotation-restart.service"; };
-          };
-          services."${service}-env-rotation-restart" = {
-            description = "Restart ${service} after secret rotation";
-            serviceConfig = {
-              Type = "oneshot";
-              ExecStart = "${pkgs.systemd}/bin/systemctl restart ${service}.service";
-            };
-          };
-        };
+      description = "Function { service, secretName, file | files, settleSeconds ? }: path unit + oneshot restarter (systemctl restart <service>) watching getPath secretName file(s).";
+      default = mkRotationWatcher "restart";
     };
     mkTryRestartOnRotation = mkOption {
       type = types.raw;
       readOnly = true;
-      description = "Function { service, secretName, file }: path unit + oneshot restarter (systemctl try-restart <service>) watching getPath secretName file.";
-      default = { service, secretName, file }:
-        let path = getPathFun secretName file;
-        in {
-          paths."${service}-env-rotation" = {
-            description = "Re-apply ${service} when its secret file rotates";
-            wantedBy = [ "multi-user.target" ];
-            pathConfig = { PathChanged = [ path ]; Unit = "${service}-env-rotation-restart.service"; };
-          };
-          services."${service}-env-rotation-restart" = {
-            description = "Try-restart ${service} after secret rotation";
-            serviceConfig = {
-              Type = "oneshot";
-              ExecStart = "${pkgs.systemd}/bin/systemctl try-restart ${service}.service";
-            };
-          };
-        };
+      description = "Function { service, secretName, file | files, settleSeconds ? }: path unit + oneshot restarter (systemctl try-restart <service>) watching getPath secretName file(s).";
+      default = mkRotationWatcher "try-restart";
     };
 
     # Helpers for reading runtime paths from Nix configurations.

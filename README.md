@@ -13,6 +13,7 @@ This repository provides a reusable Flake Parts/NixOS module exposing a small he
 - **Auto manifest**: `/run/secrets[-for-users]/vars/<name>/manifest.json`
 - **Optional discovery**: import raw declarations from `vars/generators` by tags
 - **Expose to users**: `my.secrets.exposeUserSecrets` (preferred) or `exposeUserSecret`
+  - per-entry `removeOnDisable` (default false): `ExecStop = rm -f <dest>` + `RemainAfterExit` so removing/disabling the entry deletes the copy on next deploy; opt in only when the entry alone owns `dest`
 - **Path helpers**: reference deployed secret file paths directly from Nix
 - **Prompt types**: per-file `promptType = "hidden" | "multiline-hidden"`
 - **Non-secret values**: convenient accessors for files with `secret = false`
@@ -217,6 +218,11 @@ Behavior injected by constructors:
   - `excludeTags` (list of strings, default `[]`)
 - **`my.secrets.requireGenerators`** (list of strings, default `[]`)
   - Generator names that must exist in `clan.core.vars.generators` after merge; missing entries fail evaluation (fail closed on undiscovered generators)
+- **Rotation watchers**: `mkRestartOnRotation` / `mkTryRestartOnRotation` take `{ service, secretName, file | files, settleSeconds ? 0 }`
+  - `file`: single file (default spelling; existing units byte-identical)
+  - `files`: list of files in one generator, one path unit + one restarter (`PathChanged` = all paths, deduped)
+  - `settleSeconds`: `ExecStartPre = sleep N` before the restart, so multi-file clan write batches settle (mosquitto watches 3 hashes with `settleSeconds = 5`)
+  - `file`+`files` together, empty `files`, or negative `settleSeconds` fail eval; unknown `secretName`/file throws via `getPath`
 - **`my.secrets.exposeUserSecret`** (single entry; legacy)
   - Deprecated in favor of `exposeUserSecrets`
 - **`my.secrets.exposeUserSecrets`** (list of submodules)
@@ -227,11 +233,12 @@ Behavior injected by constructors:
   - `dest` (string, default: `/var/lib/user-secrets/<user>/<secret>/<file>`)
   - `mode` (string, default `0400`)
   - `group` (string, default primary group of the user)
+  - `removeOnDisable` (bool, default false): `ExecStop = rm -f <dest>` on unit stop (entry removed/disabled); opt in only when this entry alone owns `dest`
 - **Paths helpers (read-only)**
   - `my.secrets.paths.<gen>.<file>.path`
   - `my.secrets.pathsFlat."<gen>.<file>".path`
   - `my.secrets.getPath "<gen>" "<file>" -> path` (throws at eval with available-names hint on miss — no lenient variant)
-  - `my.secrets.mkRestartOnRotation { service, secretName, file }` / `my.secrets.mkTryRestartOnRotation { ... }` (read-only fns returning `{ paths, services }` fragments to merge into your module config)
+  - `my.secrets.mkRestartOnRotation { service, secretName, file | files, settleSeconds ? }` / `my.secrets.mkTryRestartOnRotation { ... }` (read-only fns returning `{ paths, services }` fragments to merge into your module config; `files` watches a list with one shared restarter, `settleSeconds` sleeps before it so multi-file clan write batches settle)
 - **Value helpers (read-only; only for `secret = false`)**
   - `my.secrets.values.<gen>.<file>.value`
   - `my.secrets.valuesFlat."<gen>.<file>".value`
@@ -388,6 +395,28 @@ systemd.services = (config.my.secrets.mkRestartOnRotation {
 }).services;
 ```
 
+Multi-file batch (one path unit, one restart after the writes settle):
+
+```nix
+(config.my.secrets.mkTryRestartOnRotation {
+  service = "mosquitto";
+  secretName = "air-exhaust-mqtt";
+  files = [ "air-exhaust.hash" "hass.hash" "charon-ro.hash" ];
+  settleSeconds = 5;
+})
+```
+
+Tip: bind the result once instead of calling twice:
+
+```nix
+let w = config.my.secrets.mkRestartOnRotation {
+  service = "vaultwarden";
+  secretName = "vaultwarden";
+  file = "env";
+};
+in { systemd.paths = w.paths; systemd.services = w.services; }
+```
+
 ### Rotation/offboarding runbook
 
 - **Rotate a secret**: update the generator (or re-run prompts), deploy;
@@ -398,9 +427,7 @@ systemd.services = (config.my.secrets.mkRestartOnRotation {
   `allowReadAccess`. With `revokeStaleAcls = true` an empty-`readers` entry
   emits a `setfacl -x` revoker; otherwise remove the ACL manually with
   `setfacl -x <path>` on each host that granted it.
-- **Remove an exposed copy**: delete the `exposeUserSecrets` entry, deploy,
-  then delete the `dest` file on the host (no automatic cleanup — copies are
-  never removed by the helper).
+- **Remove an exposed copy**: delete the `exposeUserSecrets` entry and deploy. With per-entry `removeOnDisable = true` the unit's `ExecStop` deletes `dest` when the unit stops (requires `RemainAfterExit`, set automatically); otherwise delete the `dest` file on the host manually (copies are never removed by default).
 - **Shared (`share = true`) generators** are fleet-valid credentials: one
   host's store compromise affects all consumers. Rotate on every machine
   that discovers the generator, not just the one you touched.

@@ -6,7 +6,7 @@ let
 
   # Resolve the runtime path of a file (shared with module.nix).
   runtimePath = import ./runtime-path.nix;
-  machineName = config.clan.core.settings.machine.name or "nixos";
+  machineName = config.clan.core.settings.machine.name or config.networking.hostName or "nixos";
   relDirOf = gname: fcfg:
     fcfg.rel_dir or (
       if gens.${gname}.share or false

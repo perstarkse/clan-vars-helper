@@ -7,7 +7,7 @@ let
   # Source path of a user-scoped deployed file (shared with module.nix).
   runtimePath = import ./runtime-path.nix;
   gens = config.clan.core.vars.generators or { };
-  machineName = config.clan.core.settings.machine.name or "nixos";
+  machineName = config.clan.core.settings.machine.name or config.networking.hostName or "nixos";
   relDirOf = secretName: file:
     let
       gen = gens.${secretName} or null;

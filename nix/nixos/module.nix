@@ -80,7 +80,7 @@ let
   gens = config.clan.core.vars.generators;
   # Canonical source is clan-core's per-file `rel_dir`; the fallback keeps the
   # eval test harness (which stubs clan-core without rel_dir) working.
-  machineName = config.clan.core.settings.machine.name or "nixos";
+  machineName = config.clan.core.settings.machine.name or config.networking.hostName or "nixos";
   relDirOf = name: fcfg:
     fcfg.rel_dir or (
       if gens.${name}.share or false

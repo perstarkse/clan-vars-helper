@@ -6,6 +6,13 @@ let
 
   # Resolve the runtime path of a file (shared with module.nix).
   runtimePath = import ./runtime-path.nix;
+  machineName = config.clan.core.settings.machine.name or "nixos";
+  relDirOf = gname: fcfg:
+    fcfg.rel_dir or (
+      if gens.${gname}.share or false
+      then "shared/${gname}"
+      else "per-machine/${machineName}/${gname}"
+    );
 
   # Collect ACL intentions from generators' validation._acl_additionalReaders (JSON string)
   aclIntentsFromGenerators = lib.mapAttrs
@@ -18,7 +25,7 @@ let
       lib.mapAttrs
         (fname: fcfg:
           let
-            path = runtimePath gname fname (fcfg.neededFor or "services");
+            path = runtimePath (relDirOf gname fcfg) fname (fcfg.neededFor or "services");
             readers = readersByFile.${fname} or [ ];
           in
           {

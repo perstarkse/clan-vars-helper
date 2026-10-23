@@ -48,6 +48,13 @@ in
         validation = args.validation or null;
       };
       manifestJSONStatic = json manifestObj;
+      # Deployed vars live under clan-core's rel_dir ("shared/<gen>" or
+      # "per-machine/<machine>/<gen>"). The manifest must use the same key
+      # sops-install-secrets validates against.
+      relDir =
+        if args.share
+        then "shared/${args.name}"
+        else "per-machine/${args.hostName}/${args.name}";
       # R3.3 (manifest branch): same loud required-prompts gate as lib.nix.
       requiredPromptsCheck =
         if (args.requiredPrompts or [ ]) == [ ] then ""
@@ -70,7 +77,7 @@ in
         EOF
                 ${jq} '
                   .derivation.generatedAt = $ts
-                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "" end) + "/vars/${args.name}/" + .name)))
+                  | .files = (.files | map(.path = ("/run/secrets" + (if .neededFor == "users" then "-for-users" else "" end) + "/vars/${relDir}/" + .name)))
                 ' --arg ts "$gen_ts" "$tmp_manifest" > "$out/manifest.json"
                 chmod 0400 "$out/manifest.json"
                 rm -f "$tmp_manifest"

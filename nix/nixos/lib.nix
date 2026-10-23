@@ -121,7 +121,7 @@ let
               filesSpec = filesWithDefaults;
               userScript = script;
               inherit defaultNeededFor;
-              hostName = config.networking.hostName or "unknown-host";
+              hostName = config.clan.core.settings.machine.name or config.networking.hostName or "unknown-host";
             }
         else
         # No manifest post-processing; just run the user script

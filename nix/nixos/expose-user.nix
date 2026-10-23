@@ -6,6 +6,24 @@ let
   defaultDest = user: secret: file: "/var/lib/user-secrets/${user}/${secret}/${file}";
   # Source path of a user-scoped deployed file (shared with module.nix).
   runtimePath = import ./runtime-path.nix;
+  gens = config.clan.core.vars.generators or { };
+  machineName = config.clan.core.settings.machine.name or "nixos";
+  relDirOf = secretName: file:
+    let
+      gen = gens.${secretName} or null;
+      f = if gen != null then (gen.files.${file} or null) else null;
+    in
+    if f != null
+    then
+      f.rel_dir or (
+        if gen.share or false
+        then "shared/${secretName}"
+        else "per-machine/${machineName}/${secretName}"
+      )
+    # A stale expose entry may reference a generator that no longer exists
+    # (removeOnDisable). Keep the legacy path so the installer self-guards on
+    # a missing source instead of failing evaluation.
+    else secretName;
   mkServiceName = es:
     let
       raw = "my-expose-user-secret-${es.user}-${es.secretName}-${es.file}-${es.dest or ""}";
@@ -67,7 +85,7 @@ let
 
   mkPathUnit = es:
     let
-      srcFile = runtimePath es.secretName es.file "users";
+      srcFile = runtimePath (relDirOf es.secretName es.file) es.file "users";
       srcDir = builtins.dirOf srcFile;
     in
     {
@@ -84,7 +102,7 @@ let
 
   mkServiceUnit = es:
     let
-      srcFile = runtimePath es.secretName es.file "users";
+      srcFile = runtimePath (relDirOf es.secretName es.file) es.file "users";
       destPath = if (es.dest or "") != "" then es.dest else defaultDest es.user es.secretName es.file;
       # Every free-form string is shell-quoted: this script runs as root,
       # so an adversarial user/dest/mode can never break out of quoting.

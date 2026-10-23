@@ -78,11 +78,20 @@ let
   runtimePath = import ./runtime-path.nix;
 
   gens = config.clan.core.vars.generators;
+  # Canonical source is clan-core's per-file `rel_dir`; the fallback keeps the
+  # eval test harness (which stubs clan-core without rel_dir) working.
+  machineName = config.clan.core.settings.machine.name or "nixos";
+  relDirOf = name: fcfg:
+    fcfg.rel_dir or (
+      if gens.${name}.share or false
+      then "shared/${name}"
+      else "per-machine/${machineName}/${name}"
+    );
   nestedPaths = lib.mapAttrs
     (name: gen:
       lib.mapAttrs
         (fname: fcfg: {
-          path = runtimePath name fname (fcfg.neededFor or "services");
+          path = runtimePath (relDirOf name fcfg) fname (fcfg.neededFor or "services");
         })
         gen.files
     )
@@ -96,7 +105,7 @@ let
             fname: fcfg:
               {
                 name = "${name}.${fname}";
-                value = { path = runtimePath name fname (fcfg.neededFor or "services"); };
+                value = { path = runtimePath (relDirOf name fcfg) fname (fcfg.neededFor or "services"); };
               }
           )
           gens.${name}.files

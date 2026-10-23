@@ -458,8 +458,8 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "Evaluating NixOS Module..."
   echo "Resolved neededFor: ${gens.test-secret.files.key.neededFor}"
   # runtimePath pins (shared runtime-path.nix): users vs services scopes
-  echo "users path: ${expectPath "test-secret" "key" "/run/secrets-for-users/vars/test-secret/key"}"
-  echo "services path: ${expectPath "test-svc" "svc" "/run/secrets/vars/test-svc/svc"}"
+  echo "users path: ${expectPath "test-secret" "key" "/run/secrets-for-users/vars/per-machine/nixos/test-secret/key"}"
+  echo "services path: ${expectPath "test-svc" "svc" "/run/secrets/vars/per-machine/nixos/test-svc/svc"}"
   # discovery tag union: top-level-only, inner-only, both (union), untagged
   echo "gen-top: ${expectPresent discoverGens "gen-top"}"
   echo "gen-inner: ${expectPresent discoverGens "gen-inner"}"
@@ -468,7 +468,7 @@ pkgs.runCommand "nixos-eval-test" { } ''
   # stripMeta: no meta leaks into clan.core.vars.generators
   echo "meta stripped (gen-top): ${expectAbsent discoverGens.gen-top "meta"}"
   echo "meta stripped (gen-inner): ${expectAbsent discoverGens.gen-inner "meta"}"
-  echo "PH1 strict valid: ${expectPathStrict "strict-secret" "key" "/run/secrets-for-users/vars/strict-secret/key"}"
+  echo "PH1 strict valid: ${expectPathStrict "strict-secret" "key" "/run/secrets-for-users/vars/per-machine/nixos/strict-secret/key"}"
   echo "PH1 miss generator: ${expectThrow "getPath unknown generator" (phase1Sys.config.my.secrets.getPath "no-such-gen" "key")}"
   echo "PH1 miss file: ${expectThrow "getPath unknown file" (phase1Sys.config.my.secrets.getPath "strict-secret" "no-such-file")}"
   echo "PH1 value miss: ${expectThrow "getValue unknown" (getValue "no-such-gen" "key")}"
@@ -494,9 +494,9 @@ pkgs.runCommand "nixos-eval-test" { } ''
   echo "PH3 revoker content: ${let u = builtins.head (builtins.attrValues revokerUnits); in if lib.hasInfix "setfacl -x" u.script then "revokes" else throw "revoker unit lacks 'setfacl -x'"}"
   echo "PH3 no-revoker by default: ${if revokedUnits == { } then "skipped" else throw "revoker emitted without revokeStaleAcls"}"
   echo "PH3 required prompts: ${if lib.hasInfix "required prompt" strictGen.script then "loud" else throw "requiredPrompts check missing from script"}"
-  echo "PH3 watcher path: ${let p = rotationSys.config.systemd.paths.demo-svc-env-rotation.pathConfig; in if p.Unit == "demo-svc-env-rotation-restart.service" && p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" ] then "watches" else throw "rotation path unit miswired"}"
+  echo "PH3 watcher path: ${let p = rotationSys.config.systemd.paths.demo-svc-env-rotation.pathConfig; in if p.Unit == "demo-svc-env-rotation-restart.service" && p.PathChanged == [ "/run/secrets/vars/shared/rotation-secret/env" ] then "watches" else throw "rotation path unit miswired"}"
   echo "PH3 watcher exec: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "try-restart demo-svc.service" s.ExecStart then "try-restarts" else throw "rotation restarter miswired"}"
-  echo "PH3 multi files: ${let p = multiWatcher.paths.multi-svc-env-rotation.pathConfig; in if p.PathChanged == [ "/run/secrets/vars/rotation-secret/env" "/run/secrets/vars/rotation-secret/token" ] then "watches-both" else throw "multi-file watcher miswired: ${toString p.PathChanged}"}"
+  echo "PH3 multi files: ${let p = multiWatcher.paths.multi-svc-env-rotation.pathConfig; in if p.PathChanged == [ "/run/secrets/vars/shared/rotation-secret/env" "/run/secrets/vars/shared/rotation-secret/token" ] then "watches-both" else throw "multi-file watcher miswired: ${toString p.PathChanged}"}"
   echo "PH3 settle: ${let s = multiWatcher.services.multi-svc-env-rotation-restart.serviceConfig; in if lib.hasInfix "sleep 5" s.ExecStartPre && lib.hasInfix "restart multi-svc.service" s.ExecStart then "settles" else throw "settleSeconds miswired"}"
   echo "PH3 no settle by default: ${let s = rotationSys.config.systemd.services.demo-svc-env-rotation-restart.serviceConfig; in if !(s ? ExecStartPre) then "byte-identical" else throw "unexpected ExecStartPre on default watcher"}"
   echo "PH3 file+files rejected: ${if bothSpellingTry.success then throw "file+files accepted, want failure" else "rejected"}"
